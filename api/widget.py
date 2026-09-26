@@ -9,6 +9,17 @@ event format for both transports.
     #  {"event": "products", "data": {"items": [card, ...], "total": 7, "relaxed": []}},
     #  {"event": "done",     "data": {"persona": "customer", "intent": "find_products", ...}}]
 
+A responder turn streams (api/chat.py sends each event as it happens):
+
+    products  (when retrieval found any), card* (how_to_use / safety / compare),
+    message {"delta"}* (the answer as it is written), message {"text", "replace": true}
+    (a guardrail or fallback changed it), card (quiz / objection), message {"delta",
+    "disclaimer": true}, done {..., "latency_ms", "partial"}
+
+turn_events() is the same list for transports that deliver a turn at once
+(Streamlit): the message chunks are joined into one message event, with the
+disclaimer text in `disclaimer` and `health: true`.
+
 A card carries CARD_FIELDS only. The catalogue's description, key_ingredients,
 how_to_use and warnings go to the answer card (product_details), never onto a
 card; tags, collections and sku go nowhere.
@@ -17,7 +28,6 @@ card; tags, collections and sku go nowhere.
 from typing import Dict, Iterable, List, Optional
 
 from agents.orchestrator.orchestrator import TurnResult
-from agents.prequal.llm_call import STATUS_DEFAULT
 from agents.retrieval.index_builder import get_index
 
 # Same list as Jamila.CARD_FIELDS in web/components/bundle.js.
@@ -25,10 +35,6 @@ CARD_FIELDS = (
     "handle", "variant_id", "url", "url_ar", "image", "brand", "name", "name_ar", "size",
     "price", "compare_at_price", "discount_percent", "promotion", "available", "why", "conflict",
 )
-# Responder replies to these intents are health answers and carry the
-# disclaimer; so does any responder reply when the router fell back to its
-# default intent and the question is unknown.
-HEALTH_INTENTS = frozenset({"product_info", "how_to_use", "compare", "safety", "sales_training"})
 # The "why this product" line names at most this many values per key.
 WHY_MAX = 2
 
@@ -83,28 +89,45 @@ def cards(products: Iterable[dict], applied: Optional[Dict[str, List[str]]] = No
 
 
 def is_health_answer(turn: TurnResult) -> bool:
-    if turn.path != "responder":
-        return False
-    router_status = (turn.prequal.meta.get("status") or {}).get("router")
-    return turn.prequal.intent in HEALTH_INTENTS or router_status == STATUS_DEFAULT
+    """The responder's code rule decided the disclaimer (agents/responder/cards.py)."""
+    return turn.path == "responder" and bool(turn.disclaimer)
 
 
-def turn_events(turn: TurnResult) -> List[dict]:
+def wire_event(name: str, data: dict) -> dict:
+    """An orchestrator event -> what the widget receives: product dumps become cards."""
+    if name == "products":
+        return {"event": "products", "data": {
+            "items": cards(data.get("items") or [], data.get("applied") or {}),
+            "total": data.get("total", len(data.get("items") or [])),
+            "relaxed": data.get("relaxed", []),
+        }}
+    return {"event": name, "data": data}
+
+
+def _joined(turn: TurnResult, events: List[dict]) -> List[dict]:
+    """Responder message chunks joined into one message event, where the first chunk was."""
+    out: List[dict] = []
+    placed = False
+    for ev in events:
+        if ev["event"] != "message" or turn.path != "responder":
+            out.append(ev)
+        elif not placed:
+            placed = True
+            out.append({"event": "message", "data": {
+                "text": turn.reply, "path": turn.path, "language": ev["data"].get("language", turn.prequal.language),
+                "health": is_health_answer(turn), "disclaimer": turn.disclaimer,
+            }})
+    return out
+
+
+def done_event(turn: TurnResult) -> dict:
     pq = turn.prequal
-    events = [{"event": "message", "data": {
-        "text": turn.reply, "path": turn.path, "language": pq.language, "health": is_health_answer(turn),
-    }}]
-    if turn.products:
-        retrieval = turn.retrieval or {}
-        events.append({"event": "products", "data": {
-            "items": cards(turn.products, retrieval.get("applied_filters") or {}),
-            "total": retrieval.get("total_candidates", len(turn.products)),
-            "relaxed": retrieval.get("relaxed_keys", []),
-        }})
     retrieval = turn.retrieval
-    events.append({"event": "done", "data": {
+    return {"event": "done", "data": {
         "persona": pq.persona, "intent": pq.intent, "route": pq.route, "path": turn.path,
         "timings_ms": turn.timings_ms,
+        "latency_ms": turn.timings_ms.get("total"),
+        "partial": bool(turn.responder.get("partial")),
         # What the pipeline did, for the query console's details.
         "pipeline": {
             "query_en": pq.query_en,
@@ -116,9 +139,31 @@ def turn_events(turn: TurnResult) -> List[dict]:
             "applied_filters": (retrieval or {}).get("applied_filters") or {},
             "relaxed_keys": (retrieval or {}).get("relaxed_keys") or [],
             "total_candidates": (retrieval or {}).get("total_candidates"),
+            "responder": turn.responder,
         },
-    }})
-    return events
+    }}
+
+
+def turn_events(turn: TurnResult) -> List[dict]:
+    """The whole turn as widget events, ending with done (see the module docstring)."""
+    if turn.events:
+        events = [wire_event(e["event"], e["data"]) for e in _joined(turn, turn.events)]
+        return events + [done_event(turn)]
+    # A TurnResult built without events (tests, old callers): message, then products.
+    events = [{"event": "message", "data": {
+        "text": turn.reply, "path": turn.path, "language": turn.prequal.language, "health": is_health_answer(turn),
+        "disclaimer": turn.disclaimer,
+    }}]
+    if turn.products:
+        retrieval = turn.retrieval or {}
+        events.append(wire_event("products", {
+            "items": turn.products, "applied": retrieval.get("applied_filters") or {},
+            "total": retrieval.get("total_candidates", len(turn.products)),
+            "relaxed": retrieval.get("relaxed_keys", []),
+        }))
+    for card in turn.cards:
+        events.append({"event": "card", "data": card})
+    return events + [done_event(turn)]
 
 
 def error_events() -> List[dict]:

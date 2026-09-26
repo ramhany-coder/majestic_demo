@@ -17,7 +17,7 @@ from agents.filter_extractor.prompts import get_template, get_translate_template
 from agents.filter_extractor.rule_based import extract_rule_based
 from agents.filter_extractor.schemas import CALLS_BY_KEY, empty_output, get_schema, validate_output
 from config import settings
-from llm.client import EXTRACTOR_FALLBACK_ORDER, fallback_client
+from llm.client import EXTRACTOR_FALLBACK_ORDER, fallback_client, turn_routes
 from llm.fallback import AllRoutesFailed
 
 logger = logging.getLogger("filter_extractor")
@@ -64,7 +64,7 @@ def _timeouts(key: str, n_routes: int) -> List[float]:
 async def run_call(key: str, query: str, context: Optional[Sequence[str]] = None,
                    routes: Optional[List[str]] = None) -> CallOutcome:
     spec = CALLS_BY_KEY[key]
-    routes = list(routes if routes is not None else EXTRACTOR_FALLBACK_ORDER)
+    routes = list(routes if routes is not None else turn_routes(EXTRACTOR_FALLBACK_ORDER))
     start = time.perf_counter()
     messages = get_template(key).messages(query, context if spec.uses_context else None)
     max_tokens = int(settings.EXTRACTOR_MAX_TOKENS[key])
@@ -183,7 +183,7 @@ TRANSLATE_SCHEMA = {
 async def translate_to_english(query: str) -> tuple:
     """Optional pre-step (EXTRACTOR_TRANSLATE). Returns (english_query, status);
     on any failure the original query is used unchanged."""
-    routes = list(EXTRACTOR_FALLBACK_ORDER)
+    routes = turn_routes(EXTRACTOR_FALLBACK_ORDER)
     try:
         res = await fallback_client.aconstrained_invoke(
             get_translate_template().messages(query),

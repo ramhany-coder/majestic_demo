@@ -30,6 +30,7 @@ from agents.prequal.session_context import SessionContext, trim_history
 from agents.prequal.small_talk import (is_small_talk, small_talk_language, small_talk_query_en,
                                         small_talk_reply)
 from config import settings
+from llm.client import current_provider
 from models.prequal import PrequalResult
 
 logger = logging.getLogger("prequal")
@@ -57,7 +58,7 @@ def _cache_key(session_id: str, message: str, ctx: SessionContext) -> tuple:
     if len(history) >= 2 and history[-2].get("role") == "user" and _norm(history[-2].get("content")) == _norm(message):
         history = history[:-2]
     fingerprint = tuple((m["role"], m["content"]) for m in trim_history(history))
-    return session_id, _norm(message), fingerprint
+    return session_id, _norm(message), fingerprint, current_provider()
 
 
 async def _guard(coro, key: str, default: Callable[[], dict]) -> CallResult:

@@ -55,7 +55,8 @@ def test_products_turn_streams_message_products_done():
                                  "relaxed_keys": []})
     events = turn_events(turn)
     assert [e["event"] for e in events] == ["message", "products", "done"]
-    assert events[0]["data"] == {"text": "intro", "path": "products_only", "language": "ar", "health": False}
+    assert events[0]["data"] == {"text": "intro", "path": "products_only", "language": "ar", "health": False,
+                                 "disclaimer": None}
     assert events[1]["data"]["total"] == 4
     assert events[1]["data"]["items"][0]["why"] == {"concerns": ["hair loss"]}
     pipeline = events[2]["data"]["pipeline"]
@@ -63,22 +64,36 @@ def test_products_turn_streams_message_products_done():
     assert pipeline["applied_filters"] == {"concerns": ["hair loss"]}
 
 
-def test_health_answers_are_flagged_for_the_disclaimer():
-    turn = TurnResult(reply="Use it at night.", path="responder", prequal=pq("how_to_use", "needs_response"))
+def test_the_responders_disclaimer_flags_the_answer():
+    disclaimer = "المعلومات للتوعية ومش بديلة عن استشارة الطبيب."
+    turn = TurnResult(reply="Use it at night.", path="responder", prequal=pq("how_to_use", "needs_response"),
+                      disclaimer=disclaimer)
     events = turn_events(turn)
     assert [e["event"] for e in events] == ["message", "done"]
-    assert events[0]["data"]["health"] is True
+    assert events[0]["data"]["health"] is True and events[0]["data"]["disclaimer"] == disclaimer
     small_talk = TurnResult(reply="Hello", path="small_talk", prequal=pq("greeting", "needs_response"))
     assert turn_events(small_talk)[0]["data"]["health"] is False
-    delivery = TurnResult(reply="Delivery takes 3 days.", path="responder", prequal=pq("other", "needs_response"))
-    assert turn_events(delivery)[0]["data"]["health"] is False
+    no_rule = TurnResult(reply="Use it at night.", path="responder", prequal=pq("how_to_use", "needs_response"))
+    assert turn_events(no_rule)[0]["data"]["health"] is False
 
 
-def test_an_unknown_question_gets_the_disclaimer_when_the_router_fell_back():
-    unsure = pq("other", "needs_response")
-    unsure.meta = {"status": {"rewriter": "ok", "router": "default"}}
-    turn = TurnResult(reply="...", path="responder", prequal=unsure)
-    assert turn_events(turn)[0]["data"]["health"] is True
+def test_streamed_responder_events_are_joined_for_one_shot_transports():
+    turn = TurnResult(
+        reply="Apply at night.", path="responder", prequal=pq("how_to_use", "needs_response"),
+        products=[product()], disclaimer="Awareness only.", responder={"partial": False},
+        timings_ms={"total": 1234.0},
+        events=[
+            {"event": "products", "data": {"items": [product()], "total": 1, "relaxed": [], "applied": {}}},
+            {"event": "card", "data": {"type": "how_to_use", "handle": HANDLE, "name": "x", "steps": ["a"]}},
+            {"event": "message", "data": {"delta": "Apply ", "language": "en"}},
+            {"event": "message", "data": {"delta": "at night.", "language": "en"}},
+            {"event": "message", "data": {"delta": "Awareness only.", "disclaimer": True, "language": "en"}},
+        ])
+    events = turn_events(turn)
+    assert [e["event"] for e in events] == ["products", "card", "message", "done"]
+    assert set(events[0]["data"]["items"][0]) == set(CARD_FIELDS)          # dumps became cards
+    assert events[2]["data"]["text"] == "Apply at night." and events[2]["data"]["disclaimer"] == "Awareness only."
+    assert events[3]["data"]["latency_ms"] == 1234.0 and events[3]["data"]["partial"] is False
 
 
 def test_details_carry_the_answer_card_fields_and_mark_missing_arabic():

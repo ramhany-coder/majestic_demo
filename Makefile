@@ -1,6 +1,6 @@
 PY ?= python
 
-.PHONY: serve streamlit web web-check test eval eval-rules eval-prequal eval-prequal-e2e eval-retrieval smoke catalogs catalogs-check
+.PHONY: serve streamlit web web-check test eval eval-rules eval-prequal eval-prequal-e2e eval-retrieval eval-responder eval-responder-offline smoke catalogs catalogs-check
 
 # API server: the query console at http://127.0.0.1:8000/, the widget at /index.html (see web/README.md).
 serve:
@@ -40,6 +40,14 @@ eval-prequal-e2e:
 # the name typo test. No LLM; uses the local embedding model.
 eval-retrieval:
 	$(PY) -u -m scripts.eval_retrieval
+
+# Responder on tests/responder_eval.jsonl: live R1/R2 plus the LLM judge; the offline
+# target checks cards, disclaimer and mode with template answers (no API calls).
+eval-responder:
+	PYTHONIOENCODING=utf-8 $(PY) -u -m scripts.eval_responder --judge
+
+eval-responder-offline:
+	PYTHONIOENCODING=utf-8 $(PY) -u -m scripts.eval_responder --mode offline
 
 # Live end-to-end smoke test: raw Arabic / Arabizi messages through the whole pipeline.
 smoke:

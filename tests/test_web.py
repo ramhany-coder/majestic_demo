@@ -7,6 +7,8 @@ import re
 
 from agents.orchestrator.orchestrator import PRODUCTS_INTRO
 from agents.prequal.small_talk import REPLIES
+from agents.responder.cards import DISCLAIMER
+from agents.responder.fallback_templates import T as RESPONDER_TEMPLATES
 from api.widget import CARD_FIELDS
 from scripts.build_web import BUNDLE_JS, TOKENS_JSON, check_tokens, contrast, stale_files
 
@@ -63,8 +65,15 @@ def test_widget_copy_has_no_exclamation_marks_or_emoji():
     assert not EMOJI.search(BUNDLE)
 
 
+def _template_texts(value):
+    if isinstance(value, dict):
+        return [t for v in value.values() for t in _template_texts(v)]
+    return [value]
+
+
 def test_templated_server_replies_follow_the_voice_rules():
     texts = list(PRODUCTS_INTRO.values()) + [t for kinds in REPLIES.values() for t in kinds.values()]
+    texts += _template_texts(RESPONDER_TEMPLATES) + list(DISCLAIMER.values())
     for text in texts:
         assert "!" not in text and not EMOJI.search(text), text
         assert not re.search(r"\bليكي\b|\bليك\b", text), text

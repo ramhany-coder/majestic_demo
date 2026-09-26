@@ -242,7 +242,7 @@ handle_message(session_id, message)                 agents/orchestrator/orchestr
   SessionStore.get(session_id) -> history, last_products     agents/prequal/session_context.py
   prequalify(message, ctx)  -- rewriter || router            agents/prequal/agent.py
   needs_retrieval?
-    no  -> respond(ctx)                                       agents/responder/responder.py (stub)
+    no  -> respond(ctx)                                       agents/responder/agent.py (section 11)
     yes -> extract_filters(query_en)   (no context)           agents/filter_extractor/agent.py
            retrieve(filters, query_en)                        agents/retrieval/retrieval.py
            products_only and results -> templated intro + cards, no LLM
@@ -323,9 +323,9 @@ agent in section 10.
   - A token-overlap text search is used when there are no usable filters.
     This is the "semantic fallback"; no embedding model is configured in this
     project.
-- **Responder.** The responder is out of scope. `respond(ctx) -> str` defines
-  the interface (`ResponderContext`) and returns a templated placeholder
-  reply. It is marked TODO.
+- **Responder.** The responder was out of scope here. The stub
+  `respond(ctx) -> str` defined the interface and returned a templated
+  placeholder reply. It is replaced by the responder agent in section 11.
 
 ### Speculative extraction
 

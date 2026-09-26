@@ -18,6 +18,9 @@
   const DISCLAIMER = 'This information is for awareness and is not a substitute for consulting a doctor. · المعلومات للتوعية ومش بديلة عن استشارة الطبيب';
   let session = newId();
   let busy = false;
+  // Hidden LLM switch, as in the widget: console.html?llm=groq or ?llm=glm.
+  const LLM = ['glm', 'groq'].indexOf(new URLSearchParams(location.search).get('llm')) >= 0
+    ? new URLSearchParams(location.search).get('llm') : null;
 
   function newId() {
     return (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : 's-' + Date.now().toString(36) + Math.random().toString(36).slice(2);
@@ -79,7 +82,7 @@
     const res = await fetch('chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-      body: JSON.stringify({ message: query, session_id: session, locale: 'en' }),
+      body: JSON.stringify(Object.assign({ message: query, session_id: session, locale: 'en' }, LLM ? { llm: LLM } : {})),
     });
     if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
     const reader = res.body.getReader();

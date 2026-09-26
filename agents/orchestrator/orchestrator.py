@@ -10,6 +10,11 @@ Routing (ARCHITECTURE_NOTES.md sections 9 and 10):
 - products_only, products found, none relaxed -> templated intro in the user's language (FINAL, no LLM)
 - products_only, nothing found or relaxed     -> responder with the whole RetrievalResult, so it can explain
 - needs_response and needs_retrieval          -> responder with the whole RetrievalResult
+
+Streaming: `on_event(event, data)` receives the turn's events as they happen
+(the /chat SSE contract, before api/widget.py turns product dumps into cards):
+message, products (right after retrieval), card, and the responder's message
+chunks. The same events are kept in TurnResult.events.
 """
 
 import asyncio
@@ -23,9 +28,8 @@ from pydantic import BaseModel, Field
 from agents.filter_extractor.agent import extract_filters
 from agents.prequal.agent import prequalify
 from agents.prequal.session_context import SessionStore, get_session_store
-from agents.responder.responder import (
-    REASON_NEEDS_RESPONSE, REASON_NO_RESULTS, REASON_RELAXED, ResponderContext, respond,
-)
+from agents.responder.agent import fold_message, respond_stream
+from agents.responder.context import ResponderContext, mode_for
 from agents.retrieval.agent import retrieve
 from agents.retrieval.semantic import semantic_search
 from config import settings
@@ -66,6 +70,12 @@ class TurnResult(BaseModel):
     filters: Optional[dict] = None                           # MetadataFilters.model_dump(), when extracted
     retrieval: Optional[dict] = None                         # RetrievalResult.model_dump() without products, plus handles
     timings_ms: Dict[str, float] = Field(default_factory=dict)
+    # Everything the turn sent besides status: message (whole text or responder
+    # chunks), products (RetrievedProduct dumps), card. See api/widget.py.
+    events: List[dict] = Field(default_factory=list)
+    cards: List[dict] = Field(default_factory=list)          # responder cards: how_to_use, safety, compare, quiz, objection
+    disclaimer: Optional[str] = None                         # added by the responder's code rule; not part of `reply`
+    responder: Dict = Field(default_factory=dict)            # the responder's done data: latency_ms, partial, source, route...
 
 
 def _ms(since: float) -> float:
@@ -79,12 +89,37 @@ async def _cancel(task: Optional[asyncio.Task]) -> None:
             await task
 
 
-async def _safe_respond(ctx: ResponderContext) -> str:
+async def _run_responder(ctx: ResponderContext, emit: Callable[[str, dict], None],
+                         on_stage: Optional[Callable[[str], None]]) -> dict:
+    """Stream the responder's events through `emit`. Returns the reply text,
+    the disclaimer, the cards and the responder's done data. A responder that
+    raises still leaves a reply: the text so far, or a fixed apology."""
+    text, disclaimer, cards, done = "", None, [], {}
     try:
-        return await respond(ctx)
+        async for ev in respond_stream(ctx):
+            name, data = ev["event"], ev["data"]
+            if name == "status":
+                _notify(on_stage, data.get("stage", STAGE_WRITING))
+                continue
+            if name == "done":
+                done = data
+                continue
+            if name == "message":
+                if data.get("disclaimer"):
+                    disclaimer = data.get("delta")
+                text = fold_message(text, data)
+            elif name == "card":
+                cards.append(data)
+            emit(name, data)
+    except asyncio.CancelledError:
+        raise
     except Exception:  # noqa: BLE001 -- the chat must still reply
         logger.exception("[orchestrator] responder failed")
-        return RESPONDER_ERROR.get(ctx.language, RESPONDER_ERROR["en"])
+        done = {**done, "partial": bool(text.strip()), "source": "error"}
+        if not text.strip():
+            text = RESPONDER_ERROR.get(ctx.language, RESPONDER_ERROR["en"])
+            emit("message", {"text": text, "replace": True, "path": "responder", "language": ctx.language})
+    return {"text": text, "disclaimer": disclaimer, "cards": cards, "done": done}
 
 
 async def _safe_extract(work: Awaitable[MetadataFilters]) -> Optional[MetadataFilters]:
@@ -130,12 +165,14 @@ async def warm_up() -> int:
     from agents.filter_extractor.calls import CALL_FUNCTIONS, route_kwargs
     from agents.filter_extractor.prompts import all_templates
     from agents.prequal.agent import warm_up as prequal_warm_up
+    from agents.responder.agent import warm_up as responder_warm_up
     from agents.retrieval import semantic
     from agents.retrieval.index_builder import get_index
     from llm.client import EXTRACTOR_FALLBACK_ORDER, fallback_client
     from llm.llm_models import client_llm
 
     prequal_warm_up()
+    responder_warm_up()
     all_templates()
     get_index()
     for key in CALL_FUNCTIONS:
@@ -151,15 +188,37 @@ async def warm_up() -> int:
     return opened
 
 
-async def handle_message(message: str, session_id: str = "default",
-                         store: Optional[SessionStore] = None,
-                         on_stage: Optional[Callable[[str], None]] = None) -> TurnResult:
+async def handle_message(*args, llm: Optional[str] = None, **kwargs) -> TurnResult:
+    """Run one turn (arguments as _handle_message). `llm` picks the provider
+    for every LLM call in the turn ("glm" | "groq", see
+    settings.LLM_PROVIDER_ROUTES); None or unknown uses the configured routes."""
+    from llm.client import use_provider
+
+    with use_provider(llm):
+        return await _handle_message(*args, **kwargs)
+
+
+async def _handle_message(message: str, session_id: str = "default",
+                          store: Optional[SessionStore] = None,
+                          on_stage: Optional[Callable[[str], None]] = None,
+                          on_event: Optional[Callable[[str, dict], None]] = None) -> TurnResult:
     """`on_stage`, when given, is called with STAGE_UNDERSTANDING, then
-    STAGE_SEARCHING if retrieval runs and STAGE_WRITING if the responder runs."""
+    STAGE_SEARCHING if retrieval runs and STAGE_WRITING if the responder runs.
+    `on_event`, when given, receives every other event as it happens."""
     store = store or get_session_store()
     start = time.perf_counter()
     timings: Dict[str, float] = {}
     ctx = store.get(session_id)
+    events: List[dict] = []
+
+    def emit(name: str, data: dict) -> None:
+        events.append({"event": name, "data": data})
+        if on_event is None:
+            return
+        try:
+            on_event(name, data)
+        except Exception:  # noqa: BLE001 -- a listener never breaks the turn
+            logger.exception("[orchestrator] on_event listener failed for %s", name)
 
     # Optional speculative start: the extractor and the semantic search begin
     # when the rewriter returns, and are cancelled below if the router says
@@ -188,11 +247,12 @@ async def handle_message(message: str, session_id: str = "default",
     if pq.end:
         await cancel_spec()
         reply = pq.reply or RESPONDER_ERROR.get(pq.language, RESPONDER_ERROR["en"])
+        emit("message", {"text": reply, "path": "small_talk", "language": pq.language, "health": False})
         ctx.add_turn(message, reply, None)      # no list shown: last_products stay
         store.save(session_id, ctx)
         timings["total"] = _ms(start)
         logger.info("[orchestrator] session=%s path=small_talk timings=%s", session_id, timings)
-        return TurnResult(reply=reply, path="small_talk", prequal=pq, timings_ms=timings)
+        return TurnResult(reply=reply, path="small_talk", prequal=pq, timings_ms=timings, events=events)
 
     filters: Optional[MetadataFilters] = None
     found: Optional[RetrievalResult] = None
@@ -221,24 +281,25 @@ async def handle_message(message: str, session_id: str = "default",
         await cancel_spec()
 
     shown: Optional[List[RetrievedProduct]] = None   # None: this turn showed no product list
+    answer: dict = {"disclaimer": None, "cards": [], "done": {}}
     if pq.route == "products_only" and found is not None and found.products and not found.relaxed_keys:
         path = "products_only"
         shown = found.products
         reply = PRODUCTS_INTRO.get(pq.language, PRODUCTS_INTRO["en"])
+        emit("message", {"text": reply, "path": path, "language": pq.language, "health": False})
+        _emit_products(emit, found)
     else:
         path = "responder"
-        reason = REASON_NEEDS_RESPONSE
-        if pq.route == "products_only" and found is not None:
-            reason = REASON_RELAXED if found.products else REASON_NO_RESULTS
         if found is not None:
             shown = found.products
-        _notify(on_stage, STAGE_WRITING)
+            if found.products:
+                _emit_products(emit, found)     # retrieval's list goes out before the answer is written
         t = time.perf_counter()
-        reply = await _safe_respond(ResponderContext(
-            message=pq.query_original, query_en=pq.query_en, language=pq.language, persona=pq.persona,
-            intent=pq.intent, history=list(ctx.history), products=[p.model_dump() for p in shown or []],
-            reason=reason, retrieval=found,
-        ))
+        answer = await _run_responder(ResponderContext(
+            query_original=pq.query_original, query_en=pq.query_en, language=pq.language, persona=pq.persona,
+            intent=pq.intent, history=list(ctx.history), retrieval=found, mode=mode_for(pq.route, found),
+        ), emit, on_stage)
+        reply = answer["text"]
         timings["responder"] = _ms(t)
 
     ctx.add_turn(message, reply, [p.name for p in shown] if shown is not None else None)
@@ -257,4 +318,14 @@ async def handle_message(message: str, session_id: str = "default",
         filters=filters.model_dump() if filters is not None else None,
         retrieval={**found.model_dump(exclude={"products"}), "handles": found.handles} if found is not None else None,
         timings_ms=timings,
+        events=events,
+        cards=answer["cards"],
+        disclaimer=answer["disclaimer"],
+        responder=answer["done"],
     )
+
+
+def _emit_products(emit: Callable[[str, dict], None], found: RetrievalResult) -> None:
+    emit("products", {"items": [p.model_dump() for p in found.products],
+                      "total": found.total_candidates or len(found.products),
+                      "relaxed": list(found.relaxed_keys), "applied": dict(found.applied_filters)})

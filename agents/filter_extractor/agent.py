@@ -26,6 +26,7 @@ from agents.filter_extractor.schemas import CALLS_BY_KEY, empty_output
 from config import settings
 from llm.client import EXTRACTOR_FALLBACK_ORDER
 from llm.fallback import parse_route
+from llm.client import current_provider
 from llm.llm_models import shared_async_http_client
 from models.filter_extractor import MetadataFilters
 
@@ -60,7 +61,7 @@ def is_small_talk(query: str) -> bool:
 
 def _cache_key(query: str, context: Sequence[str]) -> tuple:
     """Case, punctuation and hyphen/space differences share one cache entry."""
-    return " ".join(normalize(query).replace("-", " ").split()), tuple(context)
+    return " ".join(normalize(query).replace("-", " ").split()), tuple(context), current_provider()
 
 
 async def _gather_calls(query: str, context: Sequence[str]) -> List[CallOutcome]:

@@ -53,14 +53,17 @@ def env(monkeypatch):
             raise
         return state["semantic"]
 
-    async def fake_respond(ctx):
+    async def fake_respond_stream(ctx):
         state["respond_calls"].append(ctx)
-        return "responder reply"
+        yield {"event": "status", "data": {"stage": "writing"}}
+        yield {"event": "message", "data": {"delta": "responder ", "path": "responder", "language": "en"}}
+        yield {"event": "message", "data": {"delta": "reply", "path": "responder", "language": "en"}}
+        yield {"event": "done", "data": {"latency_ms": 1.0, "partial": False, "source": "llm"}}
 
     monkeypatch.setattr(orch, "prequalify", fake_prequalify)
     monkeypatch.setattr(orch, "extract_filters", fake_extract)
     monkeypatch.setattr(orch, "semantic_search", fake_semantic)
-    monkeypatch.setattr(orch, "respond", fake_respond)
+    monkeypatch.setattr(orch, "respond_stream", fake_respond_stream)
     monkeypatch.setattr(settings, "PREQUAL_SPECULATIVE_EXTRACTOR", False)
     state["store"] = SessionStore()
     return state
@@ -104,7 +107,7 @@ def test_products_only_without_an_exact_match_goes_to_responder_with_no_results(
     t = turn(env, "sunscreen roll on")
     assert t.path == "responder" and t.products == []
     ctx = env["respond_calls"][0]
-    assert ctx.reason == "no_results" and ctx.retrieval.meta["near_miss_keys"] == ["product_type", "product_form"]
+    assert ctx.mode == "no_match" and ctx.retrieval.meta["near_miss_keys"] == ["product_type", "product_form"]
 
 
 def test_products_only_with_relaxed_filters_goes_to_responder(env, monkeypatch):
@@ -115,7 +118,7 @@ def test_products_only_with_relaxed_filters_goes_to_responder(env, monkeypatch):
     t = turn(env, "sunscreen roll on")
     assert t.path == "responder" and t.reply == "responder reply"
     ctx = env["respond_calls"][0]
-    assert ctx.reason == "relaxed" and ctx.products and all(p["product_type"] == "sunscreen" for p in ctx.products)
+    assert ctx.mode == "no_match" and ctx.products and all(p["product_type"] == "sunscreen" for p in ctx.products)
     assert ctx.retrieval.relaxed_keys == ["product_form"]
     assert ctx.retrieval.meta["relaxed_values"] == {"product_form": ["roll-on"]}
     assert t.retrieval["relaxed_keys"] == ["product_form"] and t.products == ctx.products
@@ -126,7 +129,7 @@ def test_products_only_with_zero_results_goes_to_responder(env, monkeypatch):
     env["prequal"] = pq("show me sunscreens", "Show me sunscreens.", language="en")
     env["filters"] = MetadataFilters(product_type=["sunscreen"])
     t = turn(env, "show me sunscreens")
-    assert t.path == "responder" and env["respond_calls"][0].reason == "no_results"
+    assert t.path == "responder" and env["respond_calls"][0].mode == "no_match"
     assert t.products == [] and t.retrieval["handles"] == []
 
 
@@ -137,8 +140,8 @@ def test_needs_response_with_retrieval_passes_products_and_context(env):
     t = turn(env, "التاني ينفع للحامل؟")
     ctx = env["respond_calls"][0]
     assert t.path == "responder"
-    assert ctx.reason == "needs_response" and ctx.intent == "safety" and ctx.persona == "customer"
-    assert ctx.message == "التاني ينفع للحامل؟" and ctx.query_en.startswith("Is Vacation Vitamin C")
+    assert ctx.mode == "answer" and ctx.intent == "safety" and ctx.persona == "customer"
+    assert ctx.query_original == "التاني ينفع للحامل؟" and ctx.query_en.startswith("Is Vacation Vitamin C")
     # A safety question returns only the named product; it isn't labeled for pregnancy.
     assert [p["handle"] for p in ctx.products] == ["vacation-vitamin-c-10-30-ml"]
     assert ctx.products[0]["match"]["conflict"] == "filter_mismatch"
@@ -204,7 +207,8 @@ def test_extractor_bug_falls_back_to_semantic_path(env, monkeypatch):
 def test_responder_error_still_replies(env, monkeypatch):
     async def broken(ctx):
         raise RuntimeError("down")
-    monkeypatch.setattr(orch, "respond", broken)
+        yield  # noqa -- an async generator that fails before its first event
+    monkeypatch.setattr(orch, "respond_stream", broken)
     env["prequal"] = pq("hi", "Hi.", route="needs_response", needs_retrieval=False, intent="greeting", language="en")
     t = turn(env, "hi")
     assert t.path == "responder" and t.reply.startswith("Sorry")
@@ -284,3 +288,26 @@ def test_a_failing_stage_listener_does_not_break_the_turn(env):
 
     t = asyncio.run(orch.handle_message("عايزة سيروم للشعر", "s1", env["store"], on_stage=broken))
     assert t.path == "products_only" and t.products
+
+
+def test_responder_events_stream_through_on_event_after_the_products(env):
+    env["prequal"] = pq("ده بيتحط ازاي؟", "How do I use Capixy Hair Serum?", route="needs_response",
+                        intent="how_to_use")
+    env["filters"] = MetadataFilters(name_en=["Capixy Hair Serum"])
+    seen = []
+    t = asyncio.run(orch.handle_message("ده بيتحط ازاي؟", "s1", env["store"],
+                                        on_event=lambda name, data: seen.append(name)))
+    assert seen == ["products", "message", "message"]          # status and done are not events of the turn
+    assert [e["event"] for e in t.events] == seen
+    assert t.reply == "responder reply" and t.responder["source"] == "llm"
+    assert env["store"].get("s1").history[-1] == {"role": "assistant", "content": "responder reply"}
+
+
+def test_a_responder_that_breaks_mid_answer_keeps_the_text(env, monkeypatch):
+    async def breaks(ctx):
+        yield {"event": "message", "data": {"delta": "Half an ans"}}
+        raise RuntimeError("socket closed")
+    monkeypatch.setattr(orch, "respond_stream", breaks)
+    env["prequal"] = pq("hi", "Hi.", route="needs_response", needs_retrieval=False, intent="greeting", language="en")
+    t = turn(env, "hi")
+    assert t.reply == "Half an ans" and t.responder["partial"] is True

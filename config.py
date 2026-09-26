@@ -27,6 +27,15 @@ class Settings:
     # endpoint (use https://open.bigmodel.cn/api/paas/v4/ for a BigModel key).
     ZAI_API_KEY = os.getenv("ZAI_API_KEY")
     ZAI_BASE_URL = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/")
+    # Per-request provider switch: a /chat request (or the Streamlit app's
+    # ?llm= query parameter) may pick one of these; every LLM call in that turn
+    # then uses its [primary, fallback] routes. Without it, the *_ROUTE settings below apply.
+    LLM_PROVIDER_ROUTES = {
+        "glm": [os.getenv("GLM_PRIMARY_ROUTE", "zai:glm-5.3-flash"),
+                os.getenv("GLM_FALLBACK_ROUTE", "zai:glm-5.3-flash")],
+        "groq": [os.getenv("GROQ_PRIMARY_ROUTE", "groq:qwen/qwen3.8-27b"),
+                 os.getenv("GROQ_FALLBACK_ROUTE", "groq:openai/gpt-oss-20b")],
+    }
 
     # --- Metadata filter extractor (agents/filter_extractor) -----------------
     # Routes are "router:model" (router is one of llm.helpers.Helpers.routers_list).
@@ -167,6 +176,45 @@ class Settings:
     # in the background (first start: download + torch import).
     RETRIEVAL_MODEL_INIT_TIMEOUT_S = _env_float("RETRIEVAL_MODEL_INIT_TIMEOUT_S", 60)
     RETRIEVAL_QUERY_CACHE_SIZE = int(os.getenv("RETRIEVAL_QUERY_CACHE_SIZE", 2048))
+
+    # --- Responder (agents/responder): the written answer, when one is needed ---
+    # R1 streams the answer on the quality tier, then the fast tier once. The
+    # quality tier defaults to the only provider configured (Z.ai GLM).
+    RESPONDER_PRIMARY_ROUTE = os.getenv("RESPONDER_PRIMARY_ROUTE", "zai:glm-5.3-flash")
+    RESPONDER_FALLBACK_ROUTE = os.getenv("RESPONDER_FALLBACK_ROUTE", EXTRACTOR_PRIMARY_ROUTE)
+    RESPONDER_USE_FALLBACK_MODEL = _env_bool("RESPONDER_USE_FALLBACK_MODEL", True)
+    RESPONDER_TEMPERATURE = _env_float("RESPONDER_TEMPERATURE", 0.3)
+    # max_tokens and the soft word limit per persona ("unknown" is a customer).
+    RESPONDER_MAX_TOKENS = {"customer": 350, "sales_trainee": 450, "doctor": 450,
+                            **json.loads(os.getenv("RESPONDER_MAX_TOKENS", "{}"))}
+    RESPONDER_WORD_LIMITS = {"customer": 80, "sales_trainee": 150, "doctor": 150,
+                             **json.loads(os.getenv("RESPONDER_WORD_LIMITS", "{}"))}
+    # Replies longer than this multiple of the word limit are cut at the last full sentence.
+    RESPONDER_LENGTH_FACTOR = _env_float("RESPONDER_LENGTH_FACTOR", 1.5)
+    # Thinking tokens added to max_tokens for reasoning models (glm-5.x cannot turn thinking off).
+    RESPONDER_REASONING_TOKEN_ALLOWANCE = int(os.getenv("RESPONDER_REASONING_TOKEN_ALLOWANCE", 600))
+    # Seconds to the first streamed token per attempt, the longest gap between
+    # tokens once streaming, and a deadline for the whole answer.
+    RESPONDER_FIRST_TOKEN_TIMEOUT_S = _env_float("RESPONDER_FIRST_TOKEN_TIMEOUT_S", 8.0)
+    RESPONDER_IDLE_TIMEOUT_S = _env_float("RESPONDER_IDLE_TIMEOUT_S", 5.0)
+    RESPONDER_DEADLINE_S = _env_float("RESPONDER_DEADLINE_S", 20.0)
+    # R2 (sales training card): runs alongside R1. It may finish up to
+    # GRACE seconds after R1's text ends, and never past DEADLINE from the start.
+    # On glm-5.3-flash R2 takes about 8-10 s and R1's text ends at about 4-5 s.
+    RESPONDER_SALES_CARD_TEMPERATURE = _env_float("RESPONDER_SALES_CARD_TEMPERATURE", 0.4)
+    RESPONDER_SALES_CARD_MAX_TOKENS = int(os.getenv("RESPONDER_SALES_CARD_MAX_TOKENS", 500))
+    RESPONDER_SALES_CARD_GRACE_S = _env_float("RESPONDER_SALES_CARD_GRACE_S", 6.0)
+    RESPONDER_SALES_CARD_DEADLINE_S = _env_float("RESPONDER_SALES_CARD_DEADLINE_S", 15.0)
+    # Product data sent to the LLM.
+    RESPONDER_MAX_PRODUCTS = int(os.getenv("RESPONDER_MAX_PRODUCTS", 5))
+    RESPONDER_DESCRIPTION_CHARS = int(os.getenv("RESPONDER_DESCRIPTION_CHARS", 400))
+    # Arabizi messages get replies in Arabic script ("arabic") or in Arabizi ("arabizi").
+    RESPONDER_ARABIZI_REPLY = os.getenv("RESPONDER_ARABIZI_REPLY", "arabic")
+    # An EGP amount or % in the answer that is not in the data sent swaps in the template answer.
+    RESPONDER_STRICT_GROUNDING = _env_bool("RESPONDER_STRICT_GROUNDING", True)
+    # Regenerate once when the answer is in the wrong language.
+    RESPONDER_LANGUAGE_RETRY = _env_bool("RESPONDER_LANGUAGE_RETRY", True)
+    RESPONDER_STORE_FACTS_PATH = os.getenv("RESPONDER_STORE_FACTS_PATH", "data/store_facts.json")
 
     # --- Sessions --------------------------------------------------------------
     SESSION_TTL_S = _env_float("SESSION_TTL_S", 24 * 3600)

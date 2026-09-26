@@ -14,7 +14,7 @@ from typing import Callable, List, Optional, Tuple
 
 from agents.filter_extractor.calls import route_kwargs
 from config import settings
-from llm.client import PREQUAL_FALLBACK_ORDER, fallback_client
+from llm.client import PREQUAL_FALLBACK_ORDER, fallback_client, turn_routes
 
 logger = logging.getLogger("prequal")
 
@@ -51,7 +51,7 @@ async def run_structured(
     deadline_s: float,
     routes: Optional[List[str]] = None,
 ) -> CallResult:
-    routes = list(routes if routes is not None else PREQUAL_FALLBACK_ORDER)
+    routes = list(routes if routes is not None else turn_routes(PREQUAL_FALLBACK_ORDER))
     start = time.perf_counter()
     timeouts = [primary_timeout_s] + [settings.PREQUAL_FALLBACK_TIMEOUT_S] * (len(routes) - 1)
     try:

@@ -87,13 +87,43 @@ storefront in `CORS_ALLOW_ORIGINS`.
 `POST /chat` with `{"message": "...", "session_id": "...", "locale": "ar" | "en"}`
 returns `text/event-stream`:
 
+Events are sent as the pipeline produces them:
+
 | Event | Data | When |
 |---|---|---|
 | `status` | `{"stage": "understanding" \| "searching" \| "writing"}` | as each pipeline stage starts |
-| `message` | `{"text", "path", "language", "health"}` | always; `health: true` adds the disclaimer |
-| `products` | `{"items": [card], "total", "relaxed"}` | when the turn shows products |
-| `done` | `{"persona", "intent", "route", "path", "timings_ms", "pipeline"}` | last; `pipeline` has the rewritten request, model status and applied filters |
-| `error` | `{"code": "pipeline_failed"}` | instead of the above if the pipeline raises |
+| `products` | `{"items": [card], "total", "relaxed"}` | when the turn shows products; on a responder turn, right after retrieval, before the answer |
+| `message` | `{"text", "path", "language", "health", "disclaimer"?}` | product-list and small-talk turns (one whole message); `health: true` shows the disclaimer (`disclaimer` holds its text when the server chose it) |
+| `card` | `{"type": "how_to_use" \| "safety" \| "compare", ...}` | responder turns: cards built in code from catalogue fields, before the text |
+| `message` | `{"delta", "path", "language"}` | responder turns: the answer as it streams; append each `delta` to one bubble |
+| `message` | `{"text", "replace": true, ...}` | responder turns: a guardrail or a fallback replaced the text; set the bubble to `text` |
+| `card` | `{"type": "quiz" \| "objection", ...}` | sales-training turns, after the text, when the card was ready in time |
+| `message` | `{"delta", "disclaimer": true, ...}` | responder turns, when the disclaimer rule applies: the disclaimer text, in the reply language |
+| `done` | `{"persona", "intent", "route", "path", "timings_ms", "latency_ms", "partial", "pipeline"}` | last; `partial: true` when the answer stream broke mid-answer; `pipeline` has the rewritten request, model status, applied filters and the responder's details |
+| `error` | `{"code": "pipeline_failed"}` | instead of `done` if the pipeline raises |
+
+Card shapes (`Jamila.ResponderCard` renders them):
+
+- `how_to_use`: `{handle, name, steps}`
+- `safety`: `{handle, name, warnings, suitable_for, flags: {pregnancy, breastfeeding}}`, each flag
+  `suitable` | `warning` | `not_listed`
+- `compare`: `{columns: [handle], names, rows: [{key, label, values}]}` (`suitable_for` values are lists)
+- `quiz`: `{items: [{q, options (4), answer_index, explain}]}`
+- `objection`: `{objection, talking_points, suggested_reply}`
+
+The Streamlit transport delivers a turn at once: `api.widget.turn_events`
+joins the responder's chunks into one `message` event there.
+
+### Hidden LLM switch
+
+An optional `"llm": "glm" | "groq"` in the request routes every LLM call of
+that turn to one provider (`settings.LLM_PROVIDER_ROUTES`); without it the
+configured `*_ROUTE` settings apply. Nothing in the UI shows it:
+
+- widget (`index.html`): open it once with `?llm=groq` or `?llm=glm`; the
+  browser remembers it (`localStorage` `jamila.llm`) until `?llm=default`.
+- query console (`console.html?llm=groq`) and the Streamlit app
+  (`...streamlit.app/?llm=groq`): for as long as the parameter is in the URL.
 
 A card carries `Jamila.CARD_FIELDS` / `api.widget.CARD_FIELDS` only (a test
 keeps the two lists equal). `description`, `key_ingredients`, `how_to_use` and
@@ -102,9 +132,10 @@ keeps the two lists equal). `description`, `key_ingredients`, `how_to_use` and
 
 ## Content rules the code enforces
 
-- **Disclaimer.** A reply is flagged `health` when it comes from the responder for a
-  health intent, or when the router fell back to its default intent. Every answer card
-  carries the disclaimer too.
+- **Disclaimer.** The responder decides it in code (ARCHITECTURE_NOTES.md section 11):
+  safety, how-to-use and product-info answers about supplements, skin repair or joint
+  products, and every customer safety answer. It arrives as the last message chunk.
+  Every answer card carries the disclaimer too.
 - **No machine translation of health copy.** The answer card reads `how_to_use_ar`,
   `warnings_ar` and `description_ar` when the catalogue has them. Otherwise it shows the
   English field with `lang="en"` and a note saying so. Today the catalogue has Arabic

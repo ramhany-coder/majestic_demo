@@ -338,6 +338,28 @@
 .j-note { display: flex; align-items: flex-start; gap: var(--j-space-1); font: var(--j-t-caption); color: var(--j-ink-muted); }
 .j-answer-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--j-space-3); }
 
+/* ---- responder cards: steps, safety, compare, quiz, objection ---- */
+
+.j-rcard { gap: var(--j-space-2); }
+.j-flags { display: flex; flex-direction: column; gap: var(--j-space-1); list-style: none; padding: 0; }
+.j-flag { display: flex; flex-wrap: wrap; gap: var(--j-space-2); font: var(--j-t-body); }
+.j-flag-label { font-weight: 600; min-inline-size: 7em; }
+.j-flag--warning { color: var(--j-warning); }
+.j-flag--not_listed { color: var(--j-ink-muted); }
+.j-compare-wrap { overflow-x: auto; max-inline-size: 100%; }
+.j-compare { border-collapse: collapse; inline-size: 100%; font: var(--j-t-caption); }
+.j-compare th, .j-compare td {
+  padding: var(--j-space-1) var(--j-space-2);
+  border-block-end: 1px solid var(--j-border);
+  text-align: start; vertical-align: top;
+}
+.j-compare thead th { font-weight: 600; }
+.j-compare tbody th { font-weight: 600; color: var(--j-ink-muted); white-space: nowrap; }
+.j-quiz { display: flex; flex-direction: column; gap: var(--j-space-3); padding-inline-start: var(--j-space-5); }
+.j-quiz-q { font: var(--j-t-body); font-weight: 600; }
+.j-quiz-options { padding-inline-start: var(--j-space-5); font: var(--j-t-body); }
+.j-say { font: var(--j-t-body); padding: var(--j-space-2) var(--j-space-3); border-inline-start: 3px solid var(--j-border); }
+
 /* ---- product results outside the panel (the query console) ---- */
 
 .j-results { display: flex; flex-direction: column; gap: var(--j-space-3); }

@@ -1,6 +1,6 @@
 import logging
 import time
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -9,12 +9,13 @@ from agents.filter_extractor.agent import extract_filters
 from agents.orchestrator.orchestrator import TurnResult, handle_message
 from agents.prequal.agent import prequalify
 from agents.prequal.session_context import SessionContext
-from agents.responder.responder import REASON_NEEDS_RESPONSE, ResponderContext, respond
+from agents.responder.agent import collect, respond_stream
+from agents.responder.context import ResponderContext, mode_for
 from agents.retrieval.agent import retrieve
 from agents.retrieval.semantic import semantic_search
 from models.filter_extractor import MetadataFilters
 from models.prequal import PrequalResult
-from models.retrieval import RetrievalResult
+from models.retrieval import RetrievalResult, RetrievedProduct
 
 router = APIRouter()
 logger = logging.getLogger("pipeline")
@@ -94,24 +95,44 @@ async def retrieve_products(payload: RetrieveRequest):
 class RespondRequest(BaseModel):
     message: str
     query_en: str
-    language: str = "en"
-    persona: str = "unknown"
+    language: Literal["ar", "arabizi", "en", "mixed"] = "en"
+    persona: Literal["customer", "sales_trainee", "doctor", "unknown"] = "unknown"
     intent: str = "other"
     history: List[Dict[str, str]] = []
+    # A RetrievalResult from /retrieve (preferred), or bare RetrievedProduct dumps.
+    retrieval: Optional[RetrievalResult] = None
     products: List[Dict[str, Any]] = []
-    reason: str = REASON_NEEDS_RESPONSE
+    route: Literal["products_only", "needs_response"] = "needs_response"
 
 
 class RespondResponse(BaseModel):
     reply: str
+    disclaimer: Optional[str] = None
+    cards: List[Dict[str, Any]] = []
+    partial: bool = False
+    source: Optional[str] = None           # llm | template
     latency_seconds: float
 
 
 @router.post("/respond", response_model=RespondResponse)
 async def respond_endpoint(payload: RespondRequest):
+    """The responder alone, collected into one JSON body (the SSE stream is POST /chat)."""
     start = time.perf_counter()
-    reply = await _run_stage("responder", lambda: respond(ResponderContext(**payload.model_dump())))
-    return {"reply": reply, "latency_seconds": round(time.perf_counter() - start, 3)}
+    found = payload.retrieval
+    if found is None and payload.products:
+        products = [RetrievedProduct(**p) for p in payload.products]
+        found = RetrievalResult(products=products, k=len(products), name_hits=[p.handle for p in products])
+    ctx = ResponderContext(query_original=payload.message, query_en=payload.query_en, language=payload.language,
+                           persona=payload.persona, intent=payload.intent, history=payload.history,
+                           retrieval=found, mode=mode_for(payload.route, found))
+
+    async def run():
+        return collect([ev async for ev in respond_stream(ctx)])
+
+    out = await _run_stage("responder", run)
+    return {"reply": out["text"], "disclaimer": out["disclaimer"], "cards": out["cards"],
+            "partial": bool(out["done"].get("partial")), "source": out["done"].get("source"),
+            "latency_seconds": round(time.perf_counter() - start, 3)}
 
 
 # ---- full pipeline ----

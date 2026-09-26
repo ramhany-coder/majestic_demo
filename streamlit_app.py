@@ -93,8 +93,17 @@ def pipeline_loop() -> asyncio.AbstractEventLoop:
     return loop
 
 
+def llm_provider():
+    """Hidden LLM switch: open the app with ?llm=groq or ?llm=glm. Anything
+    else (or nothing) uses the configured routes."""
+    asked = st.query_params.get("llm")
+    return asked if asked in settings.LLM_PROVIDER_ROUTES else None
+
+
 def run_turn(message: str, session_id: str):
-    future = asyncio.run_coroutine_threadsafe(handle_message(message, session_id), pipeline_loop())
+    llm = llm_provider()
+    turn = handle_message(message, session_id, llm=llm) if llm else handle_message(message, session_id)
+    future = asyncio.run_coroutine_threadsafe(turn, pipeline_loop())
     return future.result(timeout=TURN_TIMEOUT_S)
 
 
@@ -126,10 +135,40 @@ def show_text(text: str) -> None:
 def console_turn(query: str) -> dict:
     try:
         turn = run_turn(query, st.session_state.console_session)
-        return {"query": query, "turn": turn.model_dump(mode="json")}
+        return {"query": query, "turn": turn.model_dump(mode="json", exclude={"events"})}
     except Exception as e:  # noqa: BLE001 -- shown in the console instead
         logger.exception("Console turn failed")
         return {"query": query, "error": f"{type(e).__name__}: {e}"}
+
+
+FLAG_TEXT = {"suitable": "listed as suitable", "warning": "a warning mentions it", "not_listed": "not listed"}
+
+
+def show_responder_card(card: dict) -> None:
+    """A responder card (built in code, or the sales-training card) as plain Streamlit elements."""
+    kind = card.get("type")
+    with st.container(border=True):
+        if kind == "how_to_use":
+            show_text(f"How to use: {card['name']}\n" + "\n".join(f"{i}. {s}" for i, s in enumerate(card["steps"], 1)))
+        elif kind == "safety":
+            flags = card.get("flags") or {}
+            lines = [f"Safety: {card['name']}"] + [f"- {w}" for w in card.get("warnings") or []]
+            lines += [f"Pregnancy: {FLAG_TEXT.get(flags.get('pregnancy'), '?')} · "
+                      f"Breastfeeding: {FLAG_TEXT.get(flags.get('breastfeeding'), '?')}"]
+            show_text("\n".join(lines))
+        elif kind == "compare":
+            rows = {r["label"]: [", ".join(v) if isinstance(v, list) else ("" if v is None else v) for v in r["values"]]
+                    for r in card.get("rows") or []}
+            st.table({"": card.get("names") or card.get("columns"), **rows})
+        elif kind == "quiz":
+            for i, q in enumerate(card.get("items") or [], 1):
+                options = "\n".join(f"{'✓' if j == q['answer_index'] else '·'} {o}" for j, o in enumerate(q["options"]))
+                show_text(f"Q{i}. {q['q']}\n{options}\n{q.get('explain', '')}")
+        elif kind == "objection":
+            show_text(f"Objection: {card['objection']}\n" + "\n".join(f"- {p}" for p in card["talking_points"])
+                      + f"\nSay: {card['suggested_reply']}")
+        else:
+            st.json(card, expanded=False)
 
 
 def show_cards(t: dict, key: str) -> None:
@@ -183,6 +222,10 @@ def show_console_turn(entry: dict, index: int, products_on: bool, details_on: bo
         t = entry["turn"]
         pq = t["prequal"]
         show_text(t["reply"])
+        for card in t.get("cards") or []:
+            show_responder_card(card)
+        if t.get("disclaimer"):
+            st.caption(t["disclaimer"])
         seconds = (t.get("timings_ms") or {}).get("total", 0) / 1000
         st.caption(" · ".join([t["path"], pq["intent"], pq["persona"], pq["language"], f"{seconds:.2f} s"]))
         products = t.get("products") or []
@@ -236,7 +279,7 @@ def handle(request: dict) -> None:
         try:
             turn = run_turn(message, session)
             events = turn_events(turn)
-            state.jamila_last_turn = turn.model_dump(exclude={"products"})
+            state.jamila_last_turn = turn.model_dump(exclude={"products", "events"})
         except Exception:  # noqa: BLE001 -- the widget still gets an answer
             logger.exception("Turn failed for session=%s", session)
             events = error_events()

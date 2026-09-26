@@ -124,6 +124,17 @@
       loadingDetails: 'Loading details',
       detailsError: 'The details did not load.',
       credit: 'Jamila by Majestic · science-backed care',
+      safety: 'Safety',
+      pregnancy: 'Pregnancy',
+      breastfeeding: 'Breastfeeding',
+      flags: { suitable: 'Listed as suitable', warning: 'The label has a warning', not_listed: 'Not listed on the label' },
+      suitableFor: 'Suitable for',
+      compare: 'Comparison',
+      quiz: 'Quick quiz',
+      showAnswer: 'Show the answer',
+      objection: 'Customer objection',
+      talkingPoints: 'Talking points',
+      sayThis: 'Suggested reply',
     },
     ar: {
       launcher: 'اسأل جميلة',
@@ -188,6 +199,17 @@
       loadingDetails: 'التفاصيل بتتحمّل',
       detailsError: 'التفاصيل متحمّلتش.',
       credit: 'جميلة من Majestic · عناية مبنية على العلم',
+      safety: 'الأمان',
+      pregnancy: 'الحمل',
+      breastfeeding: 'الرضاعة',
+      flags: { suitable: 'مذكور إنه مناسب', warning: 'فيه تحذير في البيانات', not_listed: 'مش مذكور في البيانات' },
+      suitableFor: 'مناسب لـ',
+      compare: 'مقارنة',
+      quiz: 'اختبار سريع',
+      showAnswer: 'اعرض الإجابة',
+      objection: 'اعتراض العميل',
+      talkingPoints: 'نقاط الرد',
+      sayThis: 'رد مقترح',
     },
   };
 
@@ -392,7 +414,8 @@
   }
 
   function Disclaimer(opts) {
-    return h('p', { class: 'j-disclaimer' }, Icon('info', { size: 'sm' }), h('span', null, strings(opts.locale).disclaimer));
+    const text = typeof opts.disclaimer === 'string' && opts.disclaimer ? opts.disclaimer : strings(opts.locale).disclaimer;
+    return h('p', { class: 'j-disclaimer' }, Icon('info', { size: 'sm' }), h('span', { dir: 'auto' }, text));
   }
 
   function Message(opts) {
@@ -551,6 +574,73 @@
           Icon('bag'), h('span', null, s.add)) : null,
         h('a', { class: 'j-btn j-btn--link', href: localUrl(d, o.locale), target: o.linkTarget || '_blank', rel: 'noopener' },
           h('span', null, s.productPage), Icon('external', { size: 'sm' }))));
+  }
+
+  // Cards the responder sends with an answer: steps, safety and compare are
+  // built on the server from catalogue fields; quiz and objection come from
+  // the sales-training call. Catalogue text is shown as given (English).
+  function CardHeading(icon, title, warning) {
+    return h('h4', { class: 'j-answer-heading' + (warning ? ' j-answer-heading--warning' : '') }, Icon(icon, { size: 'sm' }), h('span', null, title));
+  }
+
+  function TextList(items, ordered) {
+    return h(ordered ? 'ol' : 'ul', { class: 'j-answer-list' }, (items || []).map((line) => h('li', { dir: 'auto' }, line)));
+  }
+
+  function ResponderCard(card, opts) {
+    const s = strings(opts.locale);
+    const c = card || {};
+    if (c.type === 'how_to_use') {
+      return h('article', { class: 'j-answer j-rcard' },
+        CardHeading('steps', s.howTo),
+        h('h3', { class: 'j-answer-title', dir: 'auto' }, c.name),
+        TextList(c.steps, true));
+    }
+    if (c.type === 'safety') {
+      const flags = c.flags || {};
+      const flag = (label, value) => h('li', { class: 'j-flag j-flag--' + (value || 'not_listed') },
+        h('span', { class: 'j-flag-label' }, label), h('span', null, s.flags[value] || s.flags.not_listed));
+      return h('article', { class: 'j-answer j-rcard' },
+        CardHeading('shield', s.safety),
+        h('h3', { class: 'j-answer-title', dir: 'auto' }, c.name),
+        h('ul', { class: 'j-flags', role: 'list' }, flag(s.pregnancy, flags.pregnancy), flag(s.breastfeeding, flags.breastfeeding)),
+        c.warnings && c.warnings.length ? h('section', { class: 'j-answer-section' }, CardHeading('alert', s.warnings, true), TextList(c.warnings)) : null,
+        c.suitable_for && c.suitable_for.length ? h('p', { class: 'j-answer-meta', dir: 'auto' },
+          s.suitableFor + ' ' + s.join(c.suitable_for.map((v) => term('suitable_for', v, opts.locale)))) : null);
+    }
+    if (c.type === 'compare') {
+      const cell = (row, v) => {
+        if (v === null || v === undefined || v === '' || (Array.isArray(v) && !v.length)) return '–';
+        if (Array.isArray(v)) return s.join(v.map((x) => (row.key === 'suitable_for' ? term('suitable_for', x, opts.locale) : String(x))));
+        return row.key === 'price' ? money(v, opts.locale) : String(v);
+      };
+      return h('article', { class: 'j-answer j-rcard' },
+        CardHeading('steps', s.compare),
+        h('div', { class: 'j-compare-wrap', tabindex: '0' },
+          h('table', { class: 'j-compare' },
+            h('thead', null, h('tr', null, h('th', { scope: 'col' }, ''), (c.names || c.columns || []).map((n) => h('th', { scope: 'col', dir: 'auto' }, n)))),
+            h('tbody', null, (c.rows || []).map((row) => h('tr', null,
+              h('th', { scope: 'row' }, row.label),
+              (row.values || []).map((v) => h('td', { dir: 'auto' }, cell(row, v)))))))));
+    }
+    if (c.type === 'quiz') {
+      return h('article', { class: 'j-answer j-rcard' },
+        CardHeading('flask', s.quiz),
+        h('ol', { class: 'j-quiz' }, (c.items || []).map((q) => h('li', { class: 'j-quiz-item' },
+          h('p', { class: 'j-quiz-q', dir: 'auto' }, q.q),
+          h('ol', { class: 'j-quiz-options', type: 'A' }, (q.options || []).map((o) => h('li', { dir: 'auto' }, o))),
+          h('details', { class: 'j-answer-about' },
+            h('summary', null, s.showAnswer),
+            h('p', { dir: 'auto' }, String.fromCharCode(65 + (q.answer_index || 0)) + '. ' + ((q.options || [])[q.answer_index] || '') + (q.explain ? ' · ' + q.explain : '')))))));
+    }
+    if (c.type === 'objection') {
+      return h('article', { class: 'j-answer j-rcard' },
+        CardHeading('chat', s.objection),
+        h('p', { class: 'j-answer-title', dir: 'auto' }, c.objection),
+        h('section', { class: 'j-answer-section' }, CardHeading('steps', s.talkingPoints), TextList(c.talking_points, true)),
+        h('section', { class: 'j-answer-section' }, CardHeading('chat', s.sayThis), h('p', { class: 'j-say', dir: 'auto' }, c.suggested_reply)));
+    }
+    return null;
   }
 
   function Composer(opts) {
@@ -716,6 +806,7 @@
     const state = {
       locale: o.locale, audience: o.audience, persona: null, open: o.mode === 'embedded' || !!o.open,
       sessionId: o.sessionId || uid(), busy: false, lastMessage: null, items: [], replyNode: null,
+      streamItem: null,   // the reply bubble the responder's message chunks are written into
     };
     const detailsCache = new Map();
     const panelId = uid();
@@ -770,6 +861,8 @@
         case 'answer':
           return h('div', { class: 'j-turn j-turn--wide' },
             AnswerCard(item.details, { locale: loc, onAdd: addToCart, linkTarget: o.linkTarget }));
+        case 'card':
+          return h('div', { class: 'j-turn j-turn--wide' }, ResponderCard(item.card, { locale: loc }) || h('div'));
         case 'loading':
           return h('div', { class: 'j-turn' },
             h('div', { class: 'j-bubble j-bubble--jamila j-status' }, h('span', { class: 'j-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), s.loadingDetails));
@@ -836,10 +929,26 @@
       const d = data || {};
       if (name === 'status') {
         setStatus(d.stage);
+      } else if (name === 'message' && d.disclaimer && d.delta !== undefined) {
+        // The responder's disclaimer, added by its code rule after the answer.
+        if (state.streamItem) state.streamItem = replace(state.streamItem, Object.assign({}, state.streamItem, { disclaimer: d.delta }));
+      } else if (name === 'message' && (d.delta !== undefined || d.replace)) {
+        // The responder's answer as it streams, or its corrected text.
+        if (!state.streamItem) {
+          state.streamItem = push({ kind: 'jamila', text: '', time: new Date() });
+          state.replyNode = state.streamItem.node;
+          reveal(state.replyNode);
+        }
+        state.streamItem.text = d.replace ? (d.text || '') : state.streamItem.text + d.delta;
+        const bubble = state.streamItem.node.querySelector('.j-bubble');
+        if (bubble) bubble.textContent = state.streamItem.text;
       } else if (name === 'message') {
-        state.replyNode = push({ kind: 'jamila', text: d.text || '', time: new Date(), disclaimer: !!d.health }).node;
+        state.replyNode = push({ kind: 'jamila', text: d.text || '', time: new Date(), disclaimer: d.disclaimer || !!d.health }).node;
         reveal(state.replyNode);
         announce(strings(state.locale).name + ': ' + (d.text || ''));
+      } else if (name === 'card') {
+        const node = push({ kind: 'card', card: d }).node;
+        if (!state.replyNode) reveal(node);
       } else if (name === 'products') {
         if (d.items && d.items.length) {
           const node = push({ kind: 'products', products: d.items }).node;
@@ -847,6 +956,8 @@
           announce(strings(state.locale).count(d.items.length));
         }
       } else if (name === 'done') {
+        if (state.streamItem) announce(strings(state.locale).name + ': ' + state.streamItem.text);
+        state.streamItem = null;
         if (d.persona) state.persona = d.persona;
         applyDensity();
       } else if (name === 'error') {
@@ -861,6 +972,7 @@
       state.lastMessage = message;
       if (!(sendOpts && sendOpts.retry)) push({ kind: 'user', text: message, time: new Date() });
       state.replyNode = null;
+      state.streamItem = null;
       scrollToEnd();
       setBusy(true);
       setStatus('understanding');
@@ -1057,6 +1169,7 @@
     ProductCard: ProductCard,
     Carousel: Carousel,
     AnswerCard: AnswerCard,
+    ResponderCard: ResponderCard,
     Composer: Composer,
     StatusLine: StatusLine,
     Footer: Footer,

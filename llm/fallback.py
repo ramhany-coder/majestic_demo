@@ -1,9 +1,10 @@
 import asyncio
+import contextlib
 import json
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, List, Union
+from typing import Any, AsyncIterator, Dict, List, Optional, Union
 
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel
@@ -47,6 +48,26 @@ class AllRoutesFailed(RuntimeError):
         self.errors = errors
         self.timed_out = timed_out
         super().__init__(f"All fallback models failed to generate valid constrained output. Details: {errors}")
+
+
+class StreamBroken(RuntimeError):
+    """A stream failed after it had already produced text, so the chain cannot
+    move on to the next route without repeating itself. `route` names it."""
+
+    def __init__(self, route: str, error: str):
+        self.route = route
+        self.error = error
+        super().__init__(f"stream from '{route}' broke mid-answer: {error}")
+
+
+@dataclass
+class StreamInfo:
+    """Filled in by astream as it runs: which route is streaming, and the
+    failed attempts before it."""
+    route: Optional[str] = None
+    attempt: Optional[int] = None
+    first_token_ms: Optional[float] = None
+    errors: List[str] = field(default_factory=list)
 
 
 @dataclass
@@ -235,3 +256,107 @@ class FallBack:
                 errors.append(f"{route} error: {e}")
 
         raise AllRoutesFailed(errors, timed_out=bool(errors) and timeouts_hit == len(errors))
+
+    async def astream(
+        self,
+        message: Any,
+        fallback_order: List[str],
+        *,
+        first_token_timeouts: Optional[List[float]] = None,
+        idle_timeout_s: Optional[float] = None,
+        deadline_s: Optional[float] = None,
+        model_kwargs: Optional[List[Dict[str, Any]]] = None,
+        info: Optional[StreamInfo] = None,
+    ) -> AsyncIterator[str]:
+        """
+        Entry point 4: async streamed text generation, same chain.
+
+        Yields text chunks. A route that errors or times out *before its first
+        text chunk* moves on to the next route, as in the other entry points
+        (reasoning models stream empty chunks while thinking; those don't
+        count). Once text has been yielded, a failure or a gap longer than
+        `idle_timeout_s` raises StreamBroken, so the caller can close the answer
+        cleanly. `deadline_s` caps the whole call, and hitting it after text has
+        started also raises StreamBroken. `info` is filled in as the call runs.
+
+        Raises AllRoutesFailed when no route produced any text.
+        """
+        info = info if info is not None else StreamInfo()
+        errors = info.errors
+        timeouts_hit = 0
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+
+        def remaining() -> Optional[float]:
+            return None if deadline_s is None else deadline_s - (loop.time() - start)
+
+        for i, route in enumerate(fallback_order):
+            left = remaining()
+            if left is not None and left <= 0.05:
+                errors.append(f"{route} timeout: call deadline reached before attempt")
+                timeouts_hit += 1
+                break
+            first_timeout = first_token_timeouts[i] if first_token_timeouts and i < len(first_token_timeouts) else None
+            if left is not None:
+                first_timeout = left if first_timeout is None else min(first_timeout, left)
+            attempt_start = loop.time()
+            started = False
+            stream = None
+            try:
+                router, model_name = self._resolve(route)
+                kwargs = dict(model_kwargs[i]) if model_kwargs and i < len(model_kwargs) and model_kwargs[i] else {}
+                llm = client_llm.get_cached_model(router, model_name, **kwargs)
+                stream = llm.astream(message).__aiter__()
+                while True:
+                    if started:
+                        wait = idle_timeout_s
+                        left = remaining()
+                        if left is not None:
+                            wait = left if wait is None else min(wait, left)
+                    else:
+                        wait = None if first_timeout is None else max(0.0, first_timeout - (loop.time() - attempt_start))
+                    try:
+                        chunk = await asyncio.wait_for(stream.__anext__(), timeout=wait)
+                    except StopAsyncIteration:
+                        break
+                    text = _chunk_text(chunk)
+                    if not text:
+                        continue
+                    if not started:
+                        started = True
+                        info.route = f"{router}:{model_name}"
+                        info.attempt = i
+                        info.first_token_ms = round((loop.time() - attempt_start) * 1000, 1)
+                    yield text
+                if started:
+                    return
+                raise ValueError("stream ended without any text")
+            except asyncio.CancelledError:
+                raise
+            except GeneratorExit:
+                raise
+            except Exception as e:  # noqa: BLE001 -- provider errors, timeouts, empty streams
+                timed_out = isinstance(e, asyncio.TimeoutError)
+                detail = f"timeout after {loop.time() - attempt_start:.2f}s" if timed_out else f"error: {e}"
+                if started:
+                    logger.warning("stream route '%s' broke mid-answer: %s", route, detail)
+                    raise StreamBroken(info.route or route, detail) from e
+                logger.warning("stream route '%s' failed before its first token: %s", route, detail)
+                errors.append(f"{route} {detail}")
+                timeouts_hit += int(timed_out)
+            finally:
+                if stream is not None and hasattr(stream, "aclose"):
+                    with contextlib.suppress(Exception):
+                        await stream.aclose()
+
+        raise AllRoutesFailed(errors, timed_out=bool(errors) and timeouts_hit == len(errors))
+
+
+def _chunk_text(chunk: Any) -> str:
+    """Text of one streamed message chunk (content may be a list of parts)."""
+    content = getattr(chunk, "content", chunk)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in content)
+    return ""

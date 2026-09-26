@@ -30,6 +30,22 @@
     try { localStorage.setItem('jamila.' + key, value); } catch (e) { /* private mode */ }
   }
 
+  // ---------------------------------------------------------------- hidden LLM switch
+
+  // No UI: open the page with ?llm=groq or ?llm=glm and every later request
+  // from this browser asks /chat for that provider; ?llm=default forgets it.
+  const LLM_PROVIDERS = ['glm', 'groq'];
+  function llmProvider() {
+    const asked = new URLSearchParams(location.search).get('llm');
+    if (asked === 'default') {
+      try { localStorage.removeItem('jamila.llm'); } catch (e) { /* private mode */ }
+    } else if (LLM_PROVIDERS.indexOf(asked) >= 0) {
+      writePref('llm', asked);
+    }
+    const saved = readPref('llm');
+    return LLM_PROVIDERS.indexOf(saved) >= 0 ? saved : null;
+  }
+
   // ---------------------------------------------------------------- SSE transport
 
   function dispatchFrame(frame, onEvent) {
@@ -48,12 +64,13 @@
   }
 
   function sseTransport(base) {
+    const llm = llmProvider();
     return {
       async send(request, onEvent) {
         const res = await fetch(base + '/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', Accept: 'text/event-stream' },
-          body: JSON.stringify(request),
+          body: JSON.stringify(llm ? Object.assign({}, request, { llm: llm }) : request),
         });
         if (!res.ok || !res.body) throw new Error('HTTP ' + res.status);
         const reader = res.body.getReader();
