@@ -24,6 +24,13 @@ EXTRACTOR_FALLBACK_ORDER = [settings.EXTRACTOR_PRIMARY_ROUTE] + (
     else []
 )
 
+# Pre-qualification stage (rewriter + router): same shape, its own routes.
+PREQUAL_FALLBACK_ORDER = [settings.PREQUAL_PRIMARY_ROUTE] + (
+    [settings.PREQUAL_FALLBACK_ROUTE]
+    if settings.PREQUAL_USE_FALLBACK_MODEL and settings.PREQUAL_FALLBACK_ROUTE
+    else []
+)
+
 
 fallback_kwargs = {
     f"llm_{PRIMARY_ROUTER}": PRIMARY_MODEL,

@@ -83,8 +83,11 @@ async def _gather_calls(query: str, context: Sequence[str]) -> List[CallOutcome]
 async def extract_filters(query: Optional[str], context: Optional[Sequence[str]] = None,
                           use_cache: bool = True) -> MetadataFilters:
     """`query` is the user's message (English, or any language when
-    EXTRACTOR_TRANSLATE is on). `context` is the product names from the last
-    two turns; only the names call sees it."""
+    EXTRACTOR_TRANSLATE is on). In the chat pipeline it is the prequal
+    rewriter's `query_en`, which already names any product the user referred
+    to, and no context is passed. `context` (product names from the last
+    turns) is optional; no LLM call sees it, only grounding and the
+    rule-based fallback read it."""
     start = time.perf_counter()
     query = (query or "").strip()[: settings.EXTRACTOR_MAX_QUERY_CHARS]
     context = [c for c in (context or []) if c][-MAX_CONTEXT_NAMES:]

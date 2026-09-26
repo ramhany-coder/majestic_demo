@@ -160,7 +160,9 @@ def test_query_is_trimmed(behaviour):
     assert len(behaviour["calls"]) == 10
 
 
-def test_only_names_call_gets_context(behaviour, monkeypatch):
+def test_no_call_gets_context(behaviour, monkeypatch):
+    # The prequal rewriter resolves references into the query, so even the
+    # names call no longer receives the recent product names.
     seen = {}
     real = fallback_module.FallBack.aconstrained_invoke
 
@@ -169,8 +171,8 @@ def test_only_names_call_gets_context(behaviour, monkeypatch):
         return await real(self, message, order, schema, **kw)
     monkeypatch.setattr(fallback_module.FallBack, "aconstrained_invoke", spy)
     run(extract_filters("how often should i use it?", ["Capixy Intense Tonic Spray 125ml"]))
-    assert "Capixy Intense Tonic Spray" in seen["majestic_names"]
-    assert all("Capixy" not in v for k, v in seen.items() if k != "majestic_names")
+    assert len(seen) == 10
+    assert all("Capixy" not in v and "CONTEXT" not in v for v in seen.values())
 
 
 def test_graph_node_contract(behaviour):

@@ -20,6 +20,50 @@ async def main():
 asyncio.run(main())
 ```
 
+## Chat pipeline
+
+A chat message goes through four stages:
+
+1. **Pre-qualification.** Two parallel LLM calls: the rewriter produces one
+   standalone English request, and the router decides what happens next.
+2. **Extractor.** Runs on the rewritten request.
+3. **Retrieval.**
+4. **Reply.** Either a templated product list (no LLM) or the responder.
+
+See [ARCHITECTURE_NOTES.md](ARCHITECTURE_NOTES.md) section 9.
+
+```python
+import asyncio
+from agents.orchestrator.orchestrator import handle_message, warm_up
+
+async def main():
+    await warm_up()                                  # once, at startup
+    await handle_message("عايزة سيروم للشعر", session_id="abc")
+    turn = await handle_message("في واحد مفيهوش سيليكون؟", session_id="abc")
+    print(turn.prequal.query_en)   # I need a hair serum without silicone.
+    print(turn.path, turn.reply, [p["name"] for p in turn.products])
+
+asyncio.run(main())
+```
+
+The responder in `agents/responder/responder.py` is a placeholder (TODO).
+Its interface (`respond(ResponderContext) -> str`) is final.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `PREQUAL_PRIMARY_ROUTE` / `PREQUAL_FALLBACK_ROUTE` | the `EXTRACTOR_*` routes | fast-tier models for the rewriter and router |
+| `PREQUAL_REWRITER_MAX_TOKENS` / `PREQUAL_ROUTER_MAX_TOKENS` | `120` / `40` | completion caps |
+| `PREQUAL_REWRITER_TIMEOUT_S` / `PREQUAL_ROUTER_TIMEOUT_S` | `2.0` / `1.5` | primary-attempt timeouts |
+| `PREQUAL_FALLBACK_TIMEOUT_S` | `2.0` | fallback-attempt timeout |
+| `PREQUAL_REWRITER_DEADLINE_S` / `PREQUAL_ROUTER_DEADLINE_S` | `3.5` / `3.0` | hard cap per call, across both attempts |
+| `PREQUAL_HISTORY_MESSAGES` | `6` | messages of history sent to both calls |
+| `PREQUAL_HISTORY_USER_CHARS` / `PREQUAL_HISTORY_ASSISTANT_CHARS` | `300` / `150` | per-message cuts |
+| `PREQUAL_LAST_PRODUCTS` | `5` | products from the previous turn, for "the second one" |
+| `PREQUAL_CACHE_TTL_S` | `300` | (session, message) cache, so a retried request isn't billed twice |
+| `PREQUAL_SPECULATIVE_EXTRACTOR` | `false` | start the extractor when the rewriter returns, and cancel it if no retrieval is needed |
+| `PREQUAL_ROUTE_FROM_INTENT` | `true` | send a `find_products` or `refine_products` intent to `products_only` even when the router's route says `needs_response` |
+| `RETRIEVAL_TOP_K` / `SESSION_TTL_S` | `5` / `86400` | products per turn, and session lifetime |
+
 ## Setup
 
 ```bash
@@ -28,6 +72,7 @@ cp .env.example .env        # set GROQ_API (and optionally the EXTRACTOR_* setti
 make test                   # offline unit tests
 make eval-rules             # offline eval of the rule-based fallback
 make eval                   # live eval: per-key precision/recall, exact match, p50/p95
+make eval-prequal           # live prequal eval: router accuracy, rewrite checks, e2e filter F1, latency
 ```
 
 On Windows without `make`, run the underlying commands directly, for example
@@ -89,7 +134,22 @@ nor penalized; they cover judgment calls such as a parent category implied by
 a product type, or a concern implied by a skin type. Names are scored through
 `matched_handles`.
 
-## Latest results
+## Pre-qualification results
+
+Run on 2026-09-26: `python -u -m scripts.eval_prequal`. The configured
+primary model (qwen) was out of daily quota, so these numbers come from
+`groq:openai/gpt-oss-120b` running as the only route. Full table and
+caveats: [ARCHITECTURE_NOTES.md](ARCHITECTURE_NOTES.md), section 9.
+
+| Metric | Dev (48) | Holdout (14) | Target |
+|---|---|---|---|
+| Route accuracy | 0.938 | 1.000 | ≥ 0.95 |
+| needs_retrieval accuracy | 0.979 | 1.000 | ≥ 0.97 |
+| Rewrite check (meaning keywords, no carried-over topic) | 0.938 | 0.929 | – |
+| End-to-end filter F1 (extractor on `query_en`, rules mode) | 0.880 | 0.791 | ≥ 0.85 |
+| Prequal latency p50 / p95 (gpt-oss-120b, a reasoning model) | 780 / 1517 ms | 617 / 1210 ms | ≤ 700 / 1200 ms |
+
+## Latest extractor results
 
 Holdout run on 2026-09-26: `python -u -m scripts.eval_extractor --mode llm --eval-file tests/eval_holdout.jsonl`,
 20 queries. Per-query output is in `logs/eval_results_llm_eval_holdout.jsonl`.

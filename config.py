@@ -67,6 +67,41 @@ class Settings:
     # Per-call primary timeout overrides, same JSON form (default EXTRACTOR_TIMEOUT_S).
     EXTRACTOR_CALL_TIMEOUTS = json.loads(os.getenv("EXTRACTOR_CALL_TIMEOUTS", "{}"))
 
+    # --- Pre-qualification stage (agents/prequal): rewriter + router ---------
+    # Same fast tier as the extractor unless overridden.
+    PREQUAL_PRIMARY_ROUTE = os.getenv("PREQUAL_PRIMARY_ROUTE", EXTRACTOR_PRIMARY_ROUTE)
+    PREQUAL_FALLBACK_ROUTE = os.getenv("PREQUAL_FALLBACK_ROUTE", EXTRACTOR_FALLBACK_ROUTE)
+    PREQUAL_USE_FALLBACK_MODEL = _env_bool("PREQUAL_USE_FALLBACK_MODEL", True)
+    PREQUAL_REWRITER_MAX_TOKENS = int(os.getenv("PREQUAL_REWRITER_MAX_TOKENS", 120))
+    PREQUAL_ROUTER_MAX_TOKENS = int(os.getenv("PREQUAL_ROUTER_MAX_TOKENS", 40))
+    # Primary-attempt timeouts, the fallback attempt's timeout, and a hard
+    # deadline per call over both attempts (seconds).
+    PREQUAL_REWRITER_TIMEOUT_S = _env_float("PREQUAL_REWRITER_TIMEOUT_S", 2.0)
+    PREQUAL_ROUTER_TIMEOUT_S = _env_float("PREQUAL_ROUTER_TIMEOUT_S", 1.5)
+    PREQUAL_FALLBACK_TIMEOUT_S = _env_float("PREQUAL_FALLBACK_TIMEOUT_S", 2.0)
+    PREQUAL_REWRITER_DEADLINE_S = _env_float("PREQUAL_REWRITER_DEADLINE_S", 3.5)
+    PREQUAL_ROUTER_DEADLINE_S = _env_float("PREQUAL_ROUTER_DEADLINE_S", 3.0)
+    # Chat context sent to both calls.
+    PREQUAL_HISTORY_MESSAGES = int(os.getenv("PREQUAL_HISTORY_MESSAGES", 6))
+    PREQUAL_HISTORY_USER_CHARS = int(os.getenv("PREQUAL_HISTORY_USER_CHARS", 300))
+    PREQUAL_HISTORY_ASSISTANT_CHARS = int(os.getenv("PREQUAL_HISTORY_ASSISTANT_CHARS", 150))
+    PREQUAL_LAST_PRODUCTS = int(os.getenv("PREQUAL_LAST_PRODUCTS", 5))
+    PREQUAL_MAX_QUERY_CHARS = int(os.getenv("PREQUAL_MAX_QUERY_CHARS", 500))
+    # (session_id, message) cache, so a retried request is not billed twice.
+    PREQUAL_CACHE_TTL_S = _env_float("PREQUAL_CACHE_TTL_S", 300)
+    PREQUAL_CACHE_SIZE = int(os.getenv("PREQUAL_CACHE_SIZE", 4096))
+    # Start the extractor as soon as the rewriter returns; cancel it if the
+    # router then says no retrieval is needed.
+    PREQUAL_SPECULATIVE_EXTRACTOR = _env_bool("PREQUAL_SPECULATIVE_EXTRACTOR", False)
+    # Router output with intent find_products/refine_products but route
+    # needs_response is corrected to products_only (see agents/prequal/schemas.py).
+    PREQUAL_ROUTE_FROM_INTENT = _env_bool("PREQUAL_ROUTE_FROM_INTENT", True)
+
+    # --- Orchestrator / retrieval / sessions ---------------------------------
+    RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", 5))
+    SESSION_TTL_S = _env_float("SESSION_TTL_S", 24 * 3600)
+    SESSION_MAX_SESSIONS = int(os.getenv("SESSION_MAX_SESSIONS", 10000))
+
 
 settings = Settings()
 

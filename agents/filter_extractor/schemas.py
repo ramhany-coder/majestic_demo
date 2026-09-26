@@ -48,8 +48,7 @@ def _catalog_field(name: str, key: str) -> FieldSpec:
 
 CALL_SPECS: Tuple[CallSpec, ...] = (
     CallSpec("names", "filter_extractor/names.md",
-             (FieldSpec("name_en", None, MAX_ITEMS_NAMES), FieldSpec("name_ar", None, MAX_ITEMS_NAMES)),
-             uses_context=True),
+             (FieldSpec("name_en", None, MAX_ITEMS_NAMES), FieldSpec("name_ar", None, MAX_ITEMS_NAMES))),
     CallSpec("brand", "filter_extractor/brand.md", (_catalog_field("brand", "brand"),)),
     CallSpec("category", "filter_extractor/category.md", (_catalog_field("category", "category"),)),
     CallSpec("product_group", "filter_extractor/product_group.md", (_catalog_field("product_group", "product_group"),)),

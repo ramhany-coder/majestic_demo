@@ -220,3 +220,220 @@ Its output is `{"metadata_filters": {...}}`.
   handled like any other error: fallback model, then rules.
 - **Caching.** The cache is per process. Use a shared store when running
   several workers.
+
+## 9. Pre-qualification stage (rewriter + router)
+
+Every chat message now passes through a pre-qualification stage before the
+extractor. Two small LLM calls run in parallel with `asyncio.gather`:
+
+| Call | Output | Used for |
+|---|---|---|
+| Rewriter | `query_en`, `language`, `is_follow_up` | One standalone English request, built from the message plus the chat history. This is the only text the extractor sees. |
+| Router | `route`, `needs_retrieval`, `intent`, `persona` | Decides whether retrieval runs, and whether the responder or a templated product list ends the turn. |
+
+### Where it plugs in
+
+```
+handle_message(session_id, message)                 agents/orchestrator/orchestrator.py
+  SessionStore.get(session_id) -> history, last_products     agents/prequal/session_context.py
+  prequalify(message, ctx)  -- rewriter || router            agents/prequal/agent.py
+  needs_retrieval?
+    no  -> respond(ctx)                                       agents/responder/responder.py (stub)
+    yes -> extract_filters(query_en)   (no context)           agents/filter_extractor/agent.py
+           retrieve(filters, query_en)                        agents/retrieval/retrieval.py
+           products_only and results -> templated intro + cards, no LLM
+           otherwise                 -> respond(ctx + products)
+  SessionStore.save(...)  -- history += (message, reply); last_products = products shown
+```
+
+### Reuse of the existing layers
+
+- **LLM calls.** Both calls go through `FallBack.aconstrained_invoke`, with
+  the same primary and fallback routes as the extractor
+  (`PREQUAL_PRIMARY_ROUTE` and `PREQUAL_FALLBACK_ROUTE` default to the
+  `EXTRACTOR_*` routes). They use the same per-route timeouts and chain
+  deadline, and `route_kwargs` gives reasoning models extra tokens. The shared
+  per-loop `httpx.AsyncClient` means both calls, and the extractor's 10,
+  draw from one connection pool.
+- **Structured output.** JSON-schema dicts (`agents/prequal/schemas.py`) are
+  checked again in code after each call.
+- **Prompts.** These live in `prompts/prequal/{rewriter,router}.md` and use
+  the same `## The prompt` block loader. Everything before the trailing
+  `HISTORY:` line is the static system message, a prefix that provider prompt
+  caching can reuse. The history, last products and query form the human
+  message.
+- **Cache.** `TTLCache`, the extractor's cache class, is used twice: once as
+  the prequal result cache keyed by (session_id, message), and once as the
+  in-process session store.
+
+### Session state
+
+- **Chat history.** The drug assistant keeps chat history on the client
+  (`chat_hist` in each request). This project had no session state, so
+  `SessionStore` keeps it per `session_id`, behind a get/save interface that a
+  Redis store can replace.
+- **What is sent to the LLM.** The last 6 messages, with user messages cut to
+  300 characters and assistant messages to 150, plus the numbered names of up
+  to 5 products shown in the previous turn. `last_filters` is kept for
+  debugging only and is never sent.
+- **When `last_products` changes:**
+  - It is replaced only when retrieval ran.
+  - A turn without retrieval (such as "thanks") leaves it unchanged, so
+    "the second one" still resolves on the next turn.
+
+### Changes to the extractor
+
+- **The names call no longer receives `{{context}}`.** The rewriter already
+  turns "it", "ده" and "التاني" into the product's name, so `query_en`
+  carries it. The orchestrator calls `extract_filters(query_en)` with no
+  context. `extract_filters(query, context)` keeps its signature for
+  standalone use: grounding and the rule-based fallback still read the context
+  when one is passed.
+- **`EXTRACTOR_TRANSLATE` is replaced by the rewriter** in the chat
+  pipeline. It stays available, off by default, for standalone
+  `extract_filters` use.
+
+### Fallbacks
+
+| Failure | Result |
+|---|---|
+| Rewriter, both models | `query_en` is the raw message, and `language` comes from script detection. Metadata filters are used only when the message is English and there is no history. Otherwise `skip_metadata_filters=true`, and retrieval uses text search on the raw message. |
+| Router, both models | `needs_response`, `needs_retrieval=true`, `intent=other`, `persona=unknown` |
+| Both | Both defaults apply, an error is logged, and the responder still answers |
+| Responder raises | A fixed apology in the user's language |
+
+Each call catches its own errors, so one failure never cancels the other.
+
+### Retrieval and responder
+
+- **Retrieval.** The project had no retrieval layer. `agents/retrieval`
+  applies the section 5 contract to the in-memory catalog:
+  - AND across keys, OR within a key.
+  - Named products (`matched_handles`) take priority.
+  - Filters relax in the stated order, and `exclude` is never relaxed.
+  - Unmatched terms act as soft boosts or penalties.
+  - A token-overlap text search is used when there are no usable filters.
+    This is the "semantic fallback"; no embedding model is configured in this
+    project.
+- **Responder.** The responder is out of scope. `respond(ctx) -> str` defines
+  the interface (`ResponderContext`) and returns a templated placeholder
+  reply. It is marked TODO.
+
+### Speculative extraction
+
+With `PREQUAL_SPECULATIVE_EXTRACTOR=true`, the extractor starts as soon as the
+rewriter returns, without waiting for the router. If the router then says
+`needs_retrieval=false`, the extractor task is cancelled. The flag is off by
+default, because a cancelled extraction still spends its 10 calls' tokens.
+
+### Deviations from the plan, and why
+
+- **New layers.** Retrieval, a responder stub, an in-process session store
+  and the orchestrator were added, because the project had none of them.
+- **Rewriter fallback.** Metadata filters are kept only when the raw message
+  is English and there is no history. The plan says "mostly Latin script",
+  but Arabizi is Latin script too, and the extractor expects English.
+- **Cache key.** The plan keys the cache on (session_id, message). The key
+  also includes the history the prompt sees, so the same words later in the
+  chat ("any cheaper?") don't get a stale rewrite. For a retry of a turn that
+  already completed, the trailing copy of the message is removed from the
+  history before the key is built, so retries still hit the cache.
+- **`last_products`** changes only on turns where retrieval ran (see
+  "Session state").
+- **Prompt changes after the first live eval:**
+  - The router's `route`, `needs_retrieval`, `intent` and `persona` lines were
+    made explicit. The first run showed:
+    - `needs_retrieval` read as "needs a product search"
+    - "do you have …?", "cheaper?" and "for <skin type>?" routed to
+      `needs_response`
+    - "يا دكتور" (addressing the assistant) and "my son" read as the doctor
+      persona
+  - The rewriter got one line telling it to translate small talk rather than
+    return an empty `query_en`.
+  - Both changes are noted in the prompt files.
+- **Route from intent** (`PREQUAL_ROUTE_FROM_INTENT`, on by default). When
+  the router says `find_products` or `refine_products` but `needs_response`,
+  the route becomes `products_only`.
+  - In the live eval, intent was more accurate than route, and all 4 such
+    contradictions were find requests sent to `needs_response`.
+  - The risk is a mixed "find + question" message tagged `find_products`.
+    None of the 62 eval conversations did this, and the prompt tells the model
+    to use a question intent for those.
+- **`warm_up()`.** The first live call took 4.2 s. That time was synchronous
+  cold-start work that ran inside the calls' timeouts: model construction,
+  catalog and template loading. The orchestrator's `warm_up()` does it at
+  startup.
+- **Prompt size.** Counts come from Groq's `usage`:
+
+  | Prompt | Plan estimate | qwen, before tuning | gpt-oss-120b, after tuning |
+  |---|---|---|---|
+  | Rewriter | ~450 | 666 | 786 |
+  | Router | ~400 | 478 | 739 |
+
+  The Arabic examples tokenize heavily. The offline tiktoken counts are 594
+  and 496.
+- **Extractor eval rows.** q57, q58 and h18 in the extractor eval sets were
+  rewritten into the resolved form the rewriter now produces, because the
+  names call no longer receives context.
+
+### Evaluation (2026-09-26, Groq free tier)
+
+- **Eval sets.**
+  - `tests/prequal_eval.jsonl` is the dev set: 48 conversations.
+  - `tests/prequal_holdout.jsonl` has 14 conversations, written before the
+    router prompt was tuned.
+- **Running it.** `python -m scripts.eval_prequal` runs the live prequal
+  stage, then the extractor on `query_en`. The extractor uses the offline
+  rules by default; `--extractor llm` uses the LLM.
+
+| Run | Served by | Route | needs_retrieval | Intent | Rewrite check | E2E filter F1 (rules extractor) | p50 / p95 |
+|---|---|---|---|---|---|---|---|
+| Configured routes (qwen → gpt-oss-20b), dev | 40 of 48 rewrites and 41 of 48 routes fell back to the safe default: both models had hit their 200k-tokens-per-day cap | 0.604 | 0.854 | 0.146 | 0.354 | 0.556 | 264 / 683 ms |
+| gpt-oss-120b, untuned prompts, dev | model (2 empty rewrites, 1 timeout) | 0.896 | 0.812 | 0.854 | 0.938 | 0.898 | 647 / 1262 ms |
+| gpt-oss-120b, tuned prompts, dev | model (1 timeout) | 0.875 | **0.979** | 0.917 | 0.938 | **0.880** | 780 / 1517 ms |
+| Same run, with route from intent (`--mode rescore`) | same | 0.938 | **0.979** | 0.917 | 0.938 | **0.880** | same |
+| gpt-oss-120b, tuned, **holdout**, with route from intent | model | **1.000** | **1.000** | 1.000 | 0.929 | 0.791 | 617 / 1210 ms |
+
+How to read these results:
+
+- **The first row measures the fallbacks, not the models.** It shows the
+  "both calls fail" path: every turn still got a routable result, in about
+  260 ms.
+- **gpt-oss-120b is a stand-in.** The configured primary (qwen) was out of
+  daily quota, so the runs used the only other structured-output model on
+  this account, the drug assistant's own main model. It was run as the only
+  route (`PREQUAL_PRIMARY_ROUTE=groq:openai/gpt-oss-120b`,
+  `PREQUAL_USE_FALLBACK_MODEL=false`). **These accuracy and latency numbers
+  are not qwen's.** qwen, measured on 6 warm calls, answered in 336 to 592 ms.
+- **Route target not met on dev.** Dev reaches 0.938 against 0.95. The
+  misses:
+  - c15: "do you have a sunscreen?" → `product_info`
+  - c48: "cheaper than X" → `price_offer`
+  - c22: a timeout that fell back to the default; with the fallback model on,
+    it would probably have been answered
+  - Holdout is 14/14.
+- **The dev numbers are optimistic.** The router prompt was tuned while
+  looking at the dev set.
+- **Rewriter quality.** References resolve 7/7 and topic changes 5/5, with
+  no old constraints carried over. The misses are Arabizi vocabulary:
+  "bo2a3" (stains) became "rash", "shafayef" (lips) became "eyelashes", and
+  "خشونة" (osteoarthritis) became "rough skin".
+- **The E2E F1 uses the rule-based extractor,** because the LLM extractor
+  costs about 7k tokens per row. The holdout misses (0.791) are mostly
+  category false positives from the rules, for example "Skin Care" for an
+  intimate wash. The LLM extractor was verified live on the motivating
+  conversation only: `product_type=hair serum`, `exclude=Silicone`.
+- **Latency targets not met on gpt-oss-120b.** p50 must be ≤ 0.7 s and
+  p95 ≤ 1.2 s. gpt-oss-120b is a reasoning model, and these targets were set
+  for the fast tier.
+- **Still to verify.** Re-run both sets on the configured routes once qwen's
+  daily cap resets, or on a paid tier:
+
+  ```
+  python -u -m scripts.eval_prequal
+  python -u -m scripts.eval_prequal --eval-file tests/prequal_holdout.jsonl
+  python -u -m scripts.eval_prequal --extractor llm      # full products_only path latency
+  ```
+
+  One full turn uses about 7k input tokens (prequal about 1.4k, the extractor
+  about 6k), which is nearly the free tier's 7,000 per minute.
