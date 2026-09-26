@@ -1,0 +1,128 @@
+/* Generated from tokens.json by `python -m scripts.build_web`. Do not edit by hand. */
+
+:root, :host {
+  --j-font-latin: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --j-font-arabic: "IBM Plex Sans Arabic", "IBM Plex Sans", "Segoe UI", Tahoma, sans-serif;
+  --j-type-body: 400 15px/23px var(--j-font-latin);
+  --j-type-body-ar: 400 15px/27px var(--j-font-arabic);
+  --j-type-subtitle: 600 15px/21px var(--j-font-latin);
+  --j-type-subtitle-ar: 600 15px/25px var(--j-font-arabic);
+  --j-type-title: 600 17px/24px var(--j-font-latin);
+  --j-type-title-ar: 600 17px/28px var(--j-font-arabic);
+  --j-type-label: 500 14px/20px var(--j-font-latin);
+  --j-type-label-ar: 500 14px/24px var(--j-font-arabic);
+  --j-type-caption: 400 12px/16px var(--j-font-latin);
+  --j-type-caption-ar: 400 12px/20px var(--j-font-arabic);
+  --j-type-price: 600 16px/22px var(--j-font-latin);
+  --j-type-price-ar: 600 16px/26px var(--j-font-arabic);
+  --j-type-price-was: 400 13px/18px var(--j-font-latin);
+  --j-type-price-was-ar: 400 13px/22px var(--j-font-arabic);
+  --j-type-badge: 700 11px/14px var(--j-font-latin);
+  --j-type-badge-ar: 700 11px/18px var(--j-font-arabic);
+  --j-space-0: 0;
+  --j-space-1: 4px;
+  --j-space-2: 8px;
+  --j-space-3: 12px;
+  --j-space-4: 16px;
+  --j-space-5: 20px;
+  --j-space-6: 24px;
+  --j-space-8: 32px;
+  --j-space-10: 40px;
+  --j-radius-sm: 6px;
+  --j-radius-md: 8px;
+  --j-radius-lg: 12px;
+  --j-radius-xl: 18px;
+  --j-radius-panel: 20px;
+  --j-radius-pill: 999px;
+  --j-motion-fast: 120ms;
+  --j-motion-base: 200ms;
+  --j-motion-ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+  --j-size-launcher: 52px;
+  --j-size-panel-width: 400px;
+  --j-size-panel-height: 680px;
+  --j-size-card-width: 196px;
+  --j-size-card-width-compact: 164px;
+  --j-size-avatar: 36px;
+  --j-size-control: 36px;
+  --j-size-control-lg: 44px;
+  --j-surface: #ffffff;
+  --j-surface-raised: #ffffff;
+  --j-surface-sunken: #f6f4f2;
+  --j-surface-tint: #fdf1ea;
+  --j-ink: #1d1a18;
+  --j-ink-muted: #56504b;
+  --j-ink-subtle: #6b645e;
+  --j-brand: #f46e34;
+  --j-on-brand: #2a0f02;
+  --j-brand-ink: #b0420e;
+  --j-deep: #670010;
+  --j-on-deep: #ffffff;
+  --j-deep-ink: #670010;
+  --j-success: #0b6e69;
+  --j-danger: #b3261e;
+  --j-warning: #8a5300;
+  --j-border: #ebe6e1;
+  --j-border-strong: #8e8680;
+  --j-focus: #1d1a18;
+  --j-focus-offset: #ffffff;
+  --j-shadow-card: 0 1px 2px rgba(29, 26, 24, 0.04);
+  --j-shadow-launcher: 0 6px 20px rgba(29, 26, 24, 0.18), 0 2px 6px rgba(29, 26, 24, 0.12);
+  --j-shadow-panel: 0 18px 48px rgba(29, 26, 24, 0.18), 0 4px 12px rgba(29, 26, 24, 0.08);
+  --j-shadow-toast: 0 8px 24px rgba(29, 26, 24, 0.16);
+}
+
+[data-j-theme="dark"] {
+  --j-surface: #161311;
+  --j-surface-raised: #201c19;
+  --j-surface-sunken: #110e0d;
+  --j-surface-tint: #2b1d16;
+  --j-ink: #f4efeb;
+  --j-ink-muted: #c9c0b9;
+  --j-ink-subtle: #a79e97;
+  --j-brand: #ff8a5b;
+  --j-on-brand: #2a0f02;
+  --j-brand-ink: #ff9c70;
+  --j-deep: #9e1b2d;
+  --j-on-deep: #ffffff;
+  --j-deep-ink: #ff9aa6;
+  --j-success: #5fd4c8;
+  --j-danger: #ff8f86;
+  --j-warning: #f0b95a;
+  --j-border: #2f2926;
+  --j-border-strong: #7d746e;
+  --j-focus: #f4efeb;
+  --j-focus-offset: #161311;
+  --j-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30);
+  --j-shadow-launcher: 0 6px 20px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.40);
+  --j-shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.60), 0 4px 12px rgba(0, 0, 0, 0.40);
+  --j-shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.55);
+}
+
+@media (prefers-color-scheme: dark) {
+  [data-j-theme="auto"] {
+    --j-surface: #161311;
+    --j-surface-raised: #201c19;
+    --j-surface-sunken: #110e0d;
+    --j-surface-tint: #2b1d16;
+    --j-ink: #f4efeb;
+    --j-ink-muted: #c9c0b9;
+    --j-ink-subtle: #a79e97;
+    --j-brand: #ff8a5b;
+    --j-on-brand: #2a0f02;
+    --j-brand-ink: #ff9c70;
+    --j-deep: #9e1b2d;
+    --j-on-deep: #ffffff;
+    --j-deep-ink: #ff9aa6;
+    --j-success: #5fd4c8;
+    --j-danger: #ff8f86;
+    --j-warning: #f0b95a;
+    --j-border: #2f2926;
+    --j-border-strong: #7d746e;
+    --j-focus: #f4efeb;
+    --j-focus-offset: #161311;
+    --j-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.30);
+    --j-shadow-launcher: 0 6px 20px rgba(0, 0, 0, 0.55), 0 2px 6px rgba(0, 0, 0, 0.40);
+    --j-shadow-panel: 0 18px 48px rgba(0, 0, 0, 0.60), 0 4px 12px rgba(0, 0, 0, 0.40);
+    --j-shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.55);
+  }
+}

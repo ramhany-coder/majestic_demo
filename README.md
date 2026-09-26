@@ -25,12 +25,17 @@ asyncio.run(main())
 A chat message goes through four stages:
 
 1. **Pre-qualification.** Two parallel LLM calls: the rewriter produces one
-   standalone English request, and the router decides what happens next.
-2. **Extractor.** Runs on the rewritten request.
-3. **Retrieval.**
+   standalone English request, and the router decides what happens next
+   (including `k`, how many products the user asked for).
+2. **Extractor and semantic search, in parallel.** The extractor turns the
+   rewritten request into metadata filters. The semantic search embeds it and
+   scores every product description.
+3. **Retrieval.** No LLM. Exact filters, name matching (BM25 over character
+   bigrams, so misspelled names still resolve), and the semantic scores are
+   combined into the top `k` products (10 by default).
 4. **Reply.** Either a templated product list (no LLM) or the responder.
 
-See [ARCHITECTURE_NOTES.md](ARCHITECTURE_NOTES.md) section 9.
+See [ARCHITECTURE_NOTES.md](ARCHITECTURE_NOTES.md) sections 9 and 10.
 
 ```python
 import asyncio
@@ -62,7 +67,45 @@ Its interface (`respond(ResponderContext) -> str`) is final.
 | `PREQUAL_CACHE_TTL_S` | `300` | (session, message) cache, so a retried request isn't billed twice |
 | `PREQUAL_SPECULATIVE_EXTRACTOR` | `false` | start the extractor when the rewriter returns, and cancel it if no retrieval is needed |
 | `PREQUAL_ROUTE_FROM_INTENT` | `true` | send a `find_products` or `refine_products` intent to `products_only` even when the router's route says `needs_response` |
-| `RETRIEVAL_TOP_K` / `SESSION_TTL_S` | `5` / `86400` | products per turn, and session lifetime |
+| `PREQUAL_SMALL_TALK_END` | `true` | greetings, thanks and goodbyes end the turn in prequal (`end=true`, templated `reply`, path `small_talk`); a message made only of those words makes no LLM call |
+| `SESSION_TTL_S` | `86400` | session lifetime |
+| `WARM_UP_ON_STARTUP` | `true` | run `orchestrator.warm_up()` in the API lifespan instead of on the first request |
+| `CORS_ALLOW_ORIGINS` | empty | origins allowed to call `/chat` from a browser, comma-separated |
+| `JAMILA_FRAME_HEIGHT` | `720` | the widget's height in the Streamlit app, in pixels |
+
+## Retrieval
+
+`agents/retrieval/agent.py::retrieve(filters, sem, query_en, intent, k)` returns
+a `RetrievalResult` (`models/retrieval.py`):
+
+- **Name hits first.** They are ordered by name score, whether or not they
+  pass the filters. A named product with an excluded ingredient is kept and
+  flagged `conflict: "contains_excluded"`.
+- **Then the filtered candidates, ranked.** For `find_products` and
+  `refine_products` only, the rest of the list is the filtered candidates,
+  ranked by semantic score plus small boosts. The filters are AND across keys
+  and OR within a key; `ingredients.include` means all, and
+  `ingredients.exclude` is never relaxed.
+- **Cut to `k`.**
+
+The result also lists the relaxed filter keys, the unresolved names, and the
+fallback used (`semantic_only` or `no_semantic`), so the responder can explain
+a partial match.
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `RETRIEVAL_K_DEFAULT` / `RETRIEVAL_K_MAX` | `10` / `20` | products per turn when the router gives no `k`, and the cap |
+| `RETRIEVAL_BM25_K1` / `RETRIEVAL_BM25_B` | `1.2` / `0.3` | name BM25 parameters (low `b`: names are short) |
+| `RETRIEVAL_NAME_REL_SCORE` / `RETRIEVAL_NAME_DICE_MIN` | `0.8` / `0.35` | a name hit needs BM25 ≥ 0.8 × the top score and bigram Dice ≥ 0.35 |
+| `RETRIEVAL_NAME_MAX_HITS` | `10` | hits kept per queried name (product lines have several variants) |
+| `RETRIEVAL_FILL_INTENTS` | `find_products,refine_products` | intents whose list is filled after the name hits |
+| `RETRIEVAL_BUNDLE_RULE` | `true` | drop bundles unless asked for (type bundle, group Bundles & Offers, a named bundle, or `price_offer`) |
+| `RETRIEVAL_FUSION_WEIGHTS` | see `config.py` | JSON overrides for the boosts (available, best seller, unmatched terms, bundle, ...) |
+| `RETRIEVAL_SEMANTIC_ENABLED` | `true` | `false`: no model is loaded, and the ranking uses filters, names and boosts only |
+| `RETRIEVAL_EMBEDDING_ROUTE` | `hf:sentence-transformers/all-MiniLM-L6-v2` | `hf:`, `gpt:`, `gemini:` or `ollama:` plus a model (`llm/embeddings.py`) |
+| `RETRIEVAL_EMBEDDING_MODEL_DIR` | `models/embeddings` | where an `hf:` model is downloaded once and loaded from afterwards (`model_manager.py`) |
+| `RETRIEVAL_SEMANTIC_TIMEOUT_S` | `1.5` | semantic search timeout; on timeout the ranking uses the boosts only (`no_semantic`) |
+| `RETRIEVAL_MODEL_INIT_TIMEOUT_S` | `60` | how long `warm_up()` waits for the model before letting it finish loading in the background |
 
 ## Setup
 
@@ -73,10 +116,79 @@ make test                   # offline unit tests
 make eval-rules             # offline eval of the rule-based fallback
 make eval                   # live eval: per-key precision/recall, exact match, p50/p95
 make eval-prequal           # live prequal eval: router accuracy, rewrite checks, e2e filter F1, latency
+make eval-retrieval         # retrieval eval (precision@k, recall@k, MRR, latency) + name typo test; no LLM
+make smoke                  # live end-to-end smoke test on raw Arabic / Arabizi messages
 ```
+
+The default embedding model (`hf:sentence-transformers/all-MiniLM-L6-v2`) runs
+locally through `sentence-transformers`, which pulls in torch. On a CPU-only
+host, install torch from `https://download.pytorch.org/whl/cpu` first to skip
+the CUDA wheels.
+
+Caching follows the drug assistant's design:
+
+- **The model.** The first start downloads its PyTorch weights (88 MB) into
+  `models/embeddings/`. Later starts load them from there with no network
+  call.
+- **The product embeddings.** Saved to one file,
+  `cache/product_embeddings_v<N>_<model>_<catalog hash>.npz`, and rebuilt when
+  the catalog, the model or the schema version changes.
+
+Both folders are gitignored.
 
 On Windows without `make`, run the underlying commands directly, for example
 `python -m pytest` or `python -u -m scripts.eval_extractor --mode llm`.
+
+## API
+
+```bash
+uvicorn api.app:app --reload      # or: make serve
+```
+
+On startup the lifespan (`api/app.py`) runs `orchestrator.warm_up()` inside the
+serving event loop. It loads the catalog, prompt templates, retrieval index
+and embedding model, builds the cached LLM clients, and opens pooled HTTPS
+connections. Then hit `GET /health` or `POST /api/pipeline/run` with
+`{"message": "...", "session_id": "abc"}`.
+
+The first cold start can take up to about 60 s
+(`RETRIEVAL_MODEL_INIT_TIMEOUT_S`): it downloads the embedding model and
+imports torch. Later starts take a few seconds to tens of seconds, mostly the
+torch import. If the wait runs out, the model keeps loading in the
+background, and requests rank without semantic search until it's ready.
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/health` | Liveness check |
+| `POST` | `/api/prequal` | Runs `prequalify` (rewriter + router) standalone; the caller passes `history` / `last_products` |
+| `POST` | `/api/extract` | Runs `extract_filters` standalone |
+| `POST` | `/api/retrieve` | Runs semantic search over `query_en` (unless `semantic: false`), then `retrieve` with optional `filters`, `intent` and `k`; returns the `RetrievalResult` |
+| `POST` | `/api/respond` | Runs the responder standalone |
+| `POST` | `/api/pipeline/run` | Runs a full chat turn (`handle_message`) against the server-side session store; returns `TurnResult` |
+
+A failing stage endpoint returns HTTP 500 with `failed_stage`,
+`stage_latency_seconds` and `error` in `detail`.
+
+## Frontend: the Jamila widget
+
+`web/` holds the customer-facing chat panel, Ask Jamila / اسأل جميلة: bilingual
+(Arabic RTL and English), with product cards, answer cards and a cart toast. It
+is wired to `handle_message` through two hosts:
+
+```bash
+uvicorn api.app:app --reload          # or: make serve     -> http://127.0.0.1:8000/
+streamlit run streamlit_app.py        # or: make streamlit -> http://localhost:8501/
+```
+
+| Method | Path | Description |
+|---|---|---|
+| `GET` | `/` | The widget's demo page (`web/index.html`) |
+| `POST` | `/chat` | One chat turn as server-sent events: `status`, `message`, `products`, `done` |
+| `GET` | `/api/products/{handle}` | Answer-card details: key ingredients, how to use, warnings |
+
+**Streamlit Community Cloud:** main file `streamlit_app.py`, Python 3.12, and
+`GROQ_API` in the app's secrets. See [web/README.md](web/README.md) for
+deployment, the `/chat` contract, the design tokens and the content rules.
 
 ## Configuration
 

@@ -19,7 +19,8 @@ ROUTE = "majestic_prequal_route"
 
 ANSWERS = {
     REWRITE: {"query_en": "I need a hair serum without silicone.", "language": "ar", "is_follow_up": True},
-    ROUTE: {"route": "products_only", "needs_retrieval": True, "intent": "refine_products", "persona": "customer"},
+    ROUTE: {"route": "products_only", "needs_retrieval": True, "intent": "refine_products", "persona": "customer",
+            "k": None},
 }
 
 
@@ -129,7 +130,7 @@ def test_router_timeout_does_not_block_rewriter(behaviour):
 def test_both_fail_still_returns_defaults(behaviour, caplog):
     behaviour[REWRITE] = "error"
     behaviour[ROUTE] = "error"
-    r = run(prequalify("ازيك"))
+    r = run(prequalify("عايزة سيروم للشعر"))
     assert r.meta["status"] == {"rewriter": "default", "router": "default"}
     assert r.route == "needs_response" and r.needs_retrieval
     assert any(rec.levelname == "ERROR" for rec in caplog.records)
@@ -138,7 +139,7 @@ def test_both_fail_still_returns_defaults(behaviour, caplog):
 def test_invalid_output_falls_back_to_default(behaviour):
     behaviour[ROUTE] = "bad"
     behaviour[REWRITE] = "bad"
-    r = run(prequalify("hello"))
+    r = run(prequalify("show me sunscreens"))
     assert r.meta["status"] == {"rewriter": "default", "router": "default"}
 
 
@@ -219,3 +220,47 @@ def test_broken_hook_does_not_break_the_stage(behaviour):
         raise RuntimeError("hook bug")
     r = run(prequalify("show me sunscreens", on_rewrite=hook))
     assert r.meta["status"] == {"rewriter": "ok", "router": "ok"}
+
+
+@pytest.mark.parametrize("message,lang", [("hi", "en"), ("السلام عليكم", "ar"), ("thanks a lot!", "en")])
+def test_small_talk_ends_without_llm_calls(behaviour, message, lang):
+    r = run(prequalify(message, session_id="s1"))
+    assert behaviour["calls"] == []
+    assert r.end and r.reply and r.intent == "greeting" and not r.needs_retrieval and r.language == lang
+    assert r.meta["status"] == {"rewriter": "skipped", "router": "skipped"}
+
+
+def test_small_talk_end_can_be_disabled(behaviour, monkeypatch):
+    monkeypatch.setattr(settings, "PREQUAL_SMALL_TALK_END", False)
+    r = run(prequalify("hi"))
+    assert len(behaviour["calls"]) == 2 and not r.end and r.reply is None
+
+
+def test_router_greeting_ends_the_turn(behaviour, monkeypatch):
+    monkeypatch.setitem(ANSWERS, REWRITE, {"query_en": "Hello, how is your day going?", "language": "en",
+                                          "is_follow_up": False})
+    monkeypatch.setitem(ANSWERS, ROUTE, {"route": "needs_response", "needs_retrieval": False,
+                                        "intent": "greeting", "persona": "unknown", "k": None})
+    r = run(prequalify("hey, how is your day going my friend"))
+    assert len(behaviour["calls"]) == 2
+    assert r.end and r.reply == "Hello, I'm Jamila. How can I help today?"
+
+
+def test_product_request_does_not_end(behaviour):
+    r = run(prequalify("show me sunscreens"))
+    assert not r.end and r.reply is None
+
+
+@pytest.mark.parametrize("router_k,expected,source", [(None, 10, "default"), (3, 3, "router"), (1, 1, "router"),
+                                                      (50, 20, "router"), (0, 10, "default"), ("2", 2, "router")])
+def test_k_defaults_to_10_and_is_capped_at_20(behaviour, monkeypatch, router_k, expected, source):
+    monkeypatch.setitem(ANSWERS, ROUTE, {**ANSWERS[ROUTE], "k": router_k})
+    r = run(prequalify("warreeni sun blok spray", SessionContext()))
+    assert r.meta["status"]["router"] == "ok"          # a bad k never fails the router call
+    assert r.k == expected and r.meta["k_source"] == source
+
+
+def test_router_failure_gives_default_k(behaviour):
+    behaviour[ROUTE] = "error"
+    r = run(prequalify("show me 3 sunscreens", SessionContext()))
+    assert r.meta["status"]["router"] == "default" and r.k == 10

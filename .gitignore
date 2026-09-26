@@ -17,13 +17,18 @@ dist/
 # Jupyter
 .ipynb_checkpoints/
 
-# Streamlit
-.streamlit/
+# Streamlit: config.toml is committed, secrets never are.
+.streamlit/secrets.toml
 
 # Runtime-downloaded model cache markers (config.PII_SPACY_MODEL_DIR) -- must
 # never be committed, or a fresh clone/container would wrongly believe the
 # model is already installed and skip downloading it. See model_manager.py.
 models/pii_spacy/
+
+# Embedding model downloaded once by model_manager.ensure_hf_model_downloaded
+# (config.RETRIEVAL_EMBEDDING_MODEL_DIR). Same rule: a committed marker without
+# the model files would skip a download that is still needed.
+models/embeddings/
 
 # Editors / OS
 .vscode/

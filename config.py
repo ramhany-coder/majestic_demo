@@ -96,11 +96,70 @@ class Settings:
     # Router output with intent find_products/refine_products but route
     # needs_response is corrected to products_only (see agents/prequal/schemas.py).
     PREQUAL_ROUTE_FROM_INTENT = _env_bool("PREQUAL_ROUTE_FROM_INTENT", True)
+    # Greetings / thanks / goodbyes end the turn in prequal with a templated
+    # reply: a message made only of those words skips both LLM calls, and a
+    # router intent=greeting skips everything after prequal.
+    PREQUAL_SMALL_TALK_END = _env_bool("PREQUAL_SMALL_TALK_END", True)
 
-    # --- Orchestrator / retrieval / sessions ---------------------------------
-    RETRIEVAL_TOP_K = int(os.getenv("RETRIEVAL_TOP_K", 5))
+    # --- Retrieval (agents/retrieval): exact filters + name BM25 + semantic ---
+    # Products returned per turn: the router's k, else the default; always capped.
+    RETRIEVAL_K_DEFAULT = int(os.getenv("RETRIEVAL_K_DEFAULT", 10))
+    RETRIEVAL_K_MAX = int(os.getenv("RETRIEVAL_K_MAX", 20))
+    # Name search: BM25 over character bigrams. b is low because names are short.
+    RETRIEVAL_BM25_K1 = _env_float("RETRIEVAL_BM25_K1", 1.2)
+    RETRIEVAL_BM25_B = _env_float("RETRIEVAL_BM25_B", 0.3)
+    # A name hit needs BM25 >= this share of the top score for that queried name,
+    # and a bigram Dice coefficient >= RETRIEVAL_NAME_DICE_MIN.
+    RETRIEVAL_NAME_REL_SCORE = _env_float("RETRIEVAL_NAME_REL_SCORE", 0.8)
+    RETRIEVAL_NAME_DICE_MIN = _env_float("RETRIEVAL_NAME_DICE_MIN", 0.35)
+    RETRIEVAL_NAME_MAX_HITS = int(os.getenv("RETRIEVAL_NAME_MAX_HITS", 10))
+    # Intents whose result is filled from the filtered candidates after the
+    # name hits. Every other intent returns the name hits alone (when there are any).
+    RETRIEVAL_FILL_INTENTS = tuple(
+        i.strip() for i in os.getenv("RETRIEVAL_FILL_INTENTS", "find_products,refine_products").split(",") if i.strip()
+    )
+    # Drop bundles from the candidates unless the request asks for them
+    # (product_type bundle, group Bundles & Offers, a named bundle, or a price/offer intent).
+    RETRIEVAL_BUNDLE_RULE = _env_bool("RETRIEVAL_BUNDLE_RULE", True)
+    # Fusion: final = cosine + these boosts. Override any subset with JSON, for
+    # example RETRIEVAL_FUSION_WEIGHTS='{"best_seller": 0.05}'.
+    RETRIEVAL_FUSION_WEIGHTS = {
+        "available": 0.05,
+        "best_seller": 0.03,
+        "unmatched_include": 0.05,      # per unmatched include term found in the description
+        "unmatched_concern": 0.05,      # per unmatched concern found in the description
+        "extra_concern": 0.03,          # per requested concern matched beyond the first
+        "unmatched_exclude": -0.10,     # per unmatched exclude term mentioned in the description
+        "exclude_free": 0.05,           # ... unless the description says "<term>-free" / "free from <term>"
+        "bundle": -0.05,
+        **json.loads(os.getenv("RETRIEVAL_FUSION_WEIGHTS", "{}")),
+    }
+    # Semantic search: "router:model" (see llm/embeddings.py). The default is a
+    # small local English model, so no API key is needed. Off: retrieval ranks
+    # on filters, names and boosts only, and no model is loaded (low-memory hosts).
+    RETRIEVAL_SEMANTIC_ENABLED = _env_bool("RETRIEVAL_SEMANTIC_ENABLED", True)
+    RETRIEVAL_EMBEDDING_ROUTE = os.getenv("RETRIEVAL_EMBEDDING_ROUTE", "hf:sentence-transformers/all-MiniLM-L6-v2")
+    # Where an "hf:" model is downloaded once and loaded from afterwards
+    # (model_manager.py; relative paths are under the repo root). Never commit
+    # it: a download-complete marker without its files forces a re-download.
+    RETRIEVAL_EMBEDDING_MODEL_DIR = os.getenv("RETRIEVAL_EMBEDDING_MODEL_DIR", "models/embeddings")
+    RETRIEVAL_SEMANTIC_TIMEOUT_S = _env_float("RETRIEVAL_SEMANTIC_TIMEOUT_S", 1.5)
+    # How long warm_up() waits for the model to load before letting it finish
+    # in the background (first start: download + torch import).
+    RETRIEVAL_MODEL_INIT_TIMEOUT_S = _env_float("RETRIEVAL_MODEL_INIT_TIMEOUT_S", 60)
+    RETRIEVAL_QUERY_CACHE_SIZE = int(os.getenv("RETRIEVAL_QUERY_CACHE_SIZE", 2048))
+
+    # --- Sessions --------------------------------------------------------------
     SESSION_TTL_S = _env_float("SESSION_TTL_S", 24 * 3600)
     SESSION_MAX_SESSIONS = int(os.getenv("SESSION_MAX_SESSIONS", 10000))
+
+    # --- API (api/app.py) ------------------------------------------------------
+    # Runs orchestrator.warm_up() in the FastAPI lifespan, so the first live
+    # request doesn't pay for catalog/prompt/index loading and TLS handshakes.
+    WARM_UP_ON_STARTUP = _env_bool("WARM_UP_ON_STARTUP", True)
+    # Origins allowed to call /chat from a browser (comma-separated), for the
+    # widget served from another host such as the storefront. Empty: same origin only.
+    CORS_ALLOW_ORIGINS = tuple(o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip())
 
 
 settings = Settings()

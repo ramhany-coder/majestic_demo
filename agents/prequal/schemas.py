@@ -16,6 +16,7 @@ INTENTS = (
 PERSONAS = ("customer", "sales_trainee", "doctor", "unknown")
 PRODUCT_LIST_INTENTS = ("find_products", "refine_products")
 QUERY_EN_MAX_CHARS = 400
+K_MIN, K_MAX = 1, 20      # router's k: products the user asked for (null = not stated)
 
 REWRITER_SCHEMA = {
     "title": "majestic_prequal_rewrite",
@@ -33,16 +34,18 @@ ROUTER_SCHEMA = {
     "title": "majestic_prequal_route",
     "type": "object",
     "additionalProperties": False,
-    "required": ["route", "needs_retrieval", "intent", "persona"],
+    "required": ["route", "needs_retrieval", "intent", "persona", "k"],
     "properties": {
         "route": {"type": "string", "enum": list(ROUTES)},
         "needs_retrieval": {"type": "boolean"},
         "intent": {"type": "string", "enum": list(INTENTS)},
         "persona": {"type": "string", "enum": list(PERSONAS)},
+        "k": {"type": ["integer", "null"], "minimum": K_MIN, "maximum": K_MAX},
     },
 }
 
-ROUTER_DEFAULT = {"route": "needs_response", "needs_retrieval": True, "intent": "other", "persona": "unknown"}
+ROUTER_DEFAULT = {"route": "needs_response", "needs_retrieval": True, "intent": "other", "persona": "unknown",
+                  "k": None}
 
 
 def _enum(data: dict, key: str, allowed: tuple) -> str:
@@ -56,6 +59,25 @@ def _bool(data: dict, key: str) -> bool:
     value = data.get(key)
     if not isinstance(value, bool):
         raise ValueError(f"{key}={value!r} is not a boolean")
+    return value
+
+
+def _k(data: dict, notes: List[str]) -> Optional[int]:
+    """A bad k never fails the call (route and intent matter more): it becomes
+    null, and the caller's default applies. Above K_MAX it is capped."""
+    value = data.get("k")
+    if value is None:
+        return None
+    if isinstance(value, float) and value.is_integer():
+        value = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        value = int(value.strip())
+    if not isinstance(value, int) or isinstance(value, bool) or value < K_MIN:
+        notes.append(f"k={value!r} is not a count >= {K_MIN} -> null")
+        return None
+    if value > K_MAX:
+        notes.append(f"k={value} capped at {K_MAX}")
+        return K_MAX
     return value
 
 
@@ -82,7 +104,8 @@ def validate_route(data: dict, route_from_intent: Optional[bool] = None) -> Tupl
       (PREQUAL_ROUTE_FROM_INTENT). In the live eval the model's intent was
       right more often than its route, and every such contradiction was a
       find request misrouted to needs_response.
-    - products_only always needs retrieval."""
+    - products_only always needs retrieval.
+    k is null (not stated) or 1..K_MAX; a bad value becomes null (see _k)."""
     if route_from_intent is None:
         route_from_intent = settings.PREQUAL_ROUTE_FROM_INTENT
     notes: List[str] = []
@@ -92,6 +115,7 @@ def validate_route(data: dict, route_from_intent: Optional[bool] = None) -> Tupl
         "intent": _enum(data, "intent", INTENTS),
         "persona": _enum(data, "persona", PERSONAS),
     }
+    out["k"] = _k(data, notes)
     if route_from_intent and out["intent"] in PRODUCT_LIST_INTENTS and out["route"] == "needs_response":
         out["route"] = "products_only"
         notes.append(f"intent={out['intent']} with route=needs_response -> products_only")

@@ -12,8 +12,9 @@ from agents.prequal.schemas import (
 # Offline tiktoken estimate. The plan estimated ~450 / ~400; the rewriter is
 # larger because its Arabic examples tokenize heavily, and the router grew
 # ~100 tokens when it was tuned after the first live eval (ARCHITECTURE_NOTES
-# section 9). Live counts are reported by scripts/eval_prequal.py.
-PROMPT_BUDGETS = {"rewriter": 600, "router": 500}
+# section 9), then ~135 more for the retrieval plan's k rule and its Example 3
+# (section 10). Live counts are reported by scripts/eval_prequal.py.
+PROMPT_BUDGETS = {"rewriter": 600, "router": 650}
 
 
 def test_schemas_are_strict_objects_with_titles():
@@ -117,3 +118,24 @@ def test_rewrite_default_uses_filters_only_for_standalone_english():
     assert rewrite_default("any cheaper one?", [{"role": "user", "content": "x"}])["skip_metadata_filters"] is True
     ar = rewrite_default("عايزة صن بلوك")
     assert ar == {"query_en": "عايزة صن بلوك", "language": "ar", "is_follow_up": False, "skip_metadata_filters": True}
+
+
+def test_router_schema_has_nullable_k_1_to_20():
+    assert ROUTER_SCHEMA["properties"]["k"] == {"type": ["integer", "null"], "minimum": 1, "maximum": 20}
+    assert "k" in ROUTER_SCHEMA["required"]
+
+
+@pytest.mark.parametrize("k,expected,noted", [(None, None, False), (3, 3, False), (20, 20, False), (25, 20, True),
+                                              (0, None, True), (-1, None, True), (2.0, 2, False), ("4", 4, False),
+                                              ("three", None, True), (True, None, True)])
+def test_validate_route_k(k, expected, noted):
+    base = {"route": "products_only", "needs_retrieval": True, "intent": "find_products", "persona": "customer"}
+    out, notes = validate_route({**base, "k": k})
+    assert out["k"] == expected and bool(notes) == noted
+    assert validate_route(base)[0]["k"] is None         # a missing k is null, not an error
+
+
+def test_router_prompt_teaches_k():
+    text = get_template("router").full_text("")
+    assert "k: how many products the user asks for" in text and "3ayez" in text
+    assert '"k":3}' in text and '"k":null}' in text

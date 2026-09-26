@@ -1,6 +1,8 @@
-from typing import Any, Dict, Literal
+from typing import Any, Dict, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+from config import settings
 
 Language = Literal["ar", "arabizi", "en", "mixed"]
 Route = Literal["products_only", "needs_response"]
@@ -18,11 +20,18 @@ class PrequalResult(BaseModel):
     needs_retrieval: bool
     intent: str
     persona: Persona
+    # Products to return: the router's k (how many the user asked for), else
+    # RETRIEVAL_K_DEFAULT; capped at RETRIEVAL_K_MAX. meta.k_source says which.
+    k: int = Field(default_factory=lambda: settings.RETRIEVAL_K_DEFAULT)
     # True when the rewriter failed on a non-English or follow-up message:
     # query_en is then the raw message, so retrieval skips the metadata
     # filters and uses text search only.
     skip_metadata_filters: bool = False
+    # True ends the graph after prequal: greetings, thanks and goodbyes are
+    # answered with `reply` here; no extractor, retrieval or responder.
+    end: bool = False
+    reply: Optional[str] = None
     # latency_ms: {rewriter, router, total}; status: {rewriter, router} ->
-    # ok | fallback_model | default | skipped; plus routes, prompt_tokens,
-    # notes and cached.
+    # ok | fallback_model | default | skipped; plus k_source (router | default),
+    # routes, prompt_tokens, notes and cached.
     meta: Dict[str, Any] = Field(default_factory=dict)

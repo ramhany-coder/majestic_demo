@@ -1,0 +1,17 @@
+# Streamlit shell around the Jamila widget (streamlit_app.py). The widget
+# itself follows web/tokens.json; these values echo it for Streamlit's own UI.
+# primaryColor is brand-ink, not brand: Streamlit sets white text on it.
+
+[theme]
+base = "light"
+primaryColor = "#b0420e"
+backgroundColor = "#ffffff"
+secondaryBackgroundColor = "#f6f4f2"
+textColor = "#1d1a18"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

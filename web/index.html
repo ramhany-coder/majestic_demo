@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Ask Jamila</title>
+  <link rel="icon" href="assets/Icons/mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="tokens.css">
+  <style>
+    /* Host page only. The widget brings its own styles into its Shadow DOM. */
+    html, body { margin: 0; min-height: 100%; }
+    body {
+      background: var(--j-surface);
+      color: var(--j-ink);
+      font: var(--j-type-body);
+    }
+    html[lang="ar"] body { font: var(--j-type-body-ar); }
+    .demo-announce {
+      padding-block: var(--j-space-2);
+      padding-inline: var(--j-space-4);
+      background: var(--j-surface-sunken);
+      border-block-end: 1px solid var(--j-border);
+      text-align: center;
+      font: var(--j-type-caption);
+    }
+    html[lang="ar"] .demo-announce { font: var(--j-type-caption-ar); }
+    .demo {
+      max-inline-size: 640px;
+      margin-inline: auto;
+      padding-block: var(--j-space-10);
+      padding-inline: var(--j-space-4);
+      display: flex; flex-direction: column; gap: var(--j-space-4);
+    }
+    .demo-eyebrow { margin: 0; font: var(--j-type-caption); color: var(--j-ink-muted); }
+    .demo h1 { margin: 0; font: var(--j-type-title); font-size: 28px; line-height: 36px; }
+    .demo-lede { margin: 0; color: var(--j-ink-muted); }
+    html[lang="ar"] .demo-eyebrow { font: var(--j-type-caption-ar); }
+    html[lang="ar"] .demo h1 { font: var(--j-type-title-ar); font-size: 28px; line-height: 40px; }
+    .demo-controls {
+      display: flex; flex-wrap: wrap; gap: var(--j-space-4);
+      padding-block-start: var(--j-space-4);
+      border-block-start: 1px solid var(--j-border);
+    }
+    .demo-controls label { display: flex; flex-direction: column; gap: var(--j-space-1); font: var(--j-type-label); }
+    html[lang="ar"] .demo-controls label { font: var(--j-type-label-ar); }
+    .demo-controls select {
+      min-block-size: 36px;
+      padding-inline: var(--j-space-2);
+      border: 1px solid var(--j-border-strong);
+      border-radius: var(--j-radius-md);
+      background: var(--j-surface-raised);
+      color: var(--j-ink);
+      font: inherit;
+    }
+    .demo-controls select:focus-visible {
+      outline: none;
+      box-shadow: 0 0 0 2px var(--j-focus-offset), 0 0 0 4px var(--j-focus);
+    }
+    /* Inside Streamlit the page is the component's iframe: the panel fills it. */
+    .is-embedded .demo-announce, .is-embedded .demo { display: none; }
+    .is-embedded, .is-embedded body { height: 100%; background: transparent; }
+    .is-embedded #jamila { position: fixed; inset: 0; }
+  </style>
+</head>
+<body>
+  <div class="demo-announce" data-copy="announcement">Free shipping on orders above 999 EGP</div>
+  <main class="demo">
+    <p class="demo-eyebrow" data-copy="eyebrow">Local demo</p>
+    <h1 data-copy="title">Ask Jamila</h1>
+    <p class="demo-lede" data-copy="lede"></p>
+    <form class="demo-controls" onsubmit="return false">
+      <label><span data-copy="language">Language</span>
+        <select id="demo-locale">
+          <option value="en" lang="en">English</option>
+          <option value="ar" lang="ar">العربية</option>
+        </select>
+      </label>
+      <label><span data-copy="audience">Audience</span>
+        <select id="demo-audience">
+          <option value="auto" data-option="audiences.auto">Detected from the chat</option>
+          <option value="customer" data-option="audiences.customer">Customer</option>
+          <option value="trainee" data-option="audiences.trainee">Sales trainee</option>
+          <option value="professional" data-option="audiences.professional">Doctor or pharmacist</option>
+        </select>
+      </label>
+      <label><span data-copy="theme">Theme</span>
+        <select id="demo-theme">
+          <option value="light" data-option="themes.light">Light</option>
+          <option value="dark" data-option="themes.dark">Dark</option>
+          <option value="auto" data-option="themes.auto">Follow the system</option>
+        </select>
+      </label>
+    </form>
+  </main>
+  <div id="jamila"></div>
+  <script src="components/bundle.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

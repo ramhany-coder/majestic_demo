@@ -8,7 +8,8 @@
 Each row is one conversation turn: history, last products and the new
 message, with the expected rewrite meaning and routing labels.
 
-- Router metrics: accuracy of route, needs_retrieval, intent, persona;
+- Router metrics: accuracy of route, needs_retrieval, intent, persona and
+  k (the count the user asked for; a row without expected.k expects null);
   plus the rewriter's language and is_follow_up. Rows list every
   acceptable intent / persona where the label is a judgment call.
 - Rewrite check: the rewrite must contain one alternative from every
@@ -19,8 +20,8 @@ message, with the expected rewrite meaning and routing labels.
   filters are scored against the row's expected filters with the extractor
   eval's rules (optional values neither rewarded nor penalized), per key F1.
 - Latency: prequal p50 / p95, and the full products_only path (prequal +
-  extractor + retrieval) p95 over rows routed products_only. The full-path
-  number is only meaningful with --extractor llm.
+  extractor || semantic search + retrieval) p95 over rows routed
+  products_only. The full-path number is only meaningful with --extractor llm.
 
 Targets (plan section 9/8): route >= 0.95, needs_retrieval >= 0.97, e2e
 micro F1 >= 0.85, prequal p50 <= 700 ms / p95 <= 1200 ms, products_only
@@ -45,13 +46,15 @@ from agents.orchestrator.orchestrator import warm_up  # noqa: E402
 from agents.prequal.agent import get_cache, prequalify  # noqa: E402
 from agents.prequal.schemas import validate_route  # noqa: E402
 from agents.prequal.session_context import SessionContext  # noqa: E402
-from agents.retrieval.retrieval import retrieve  # noqa: E402
+from agents.retrieval.agent import retrieve  # noqa: E402
+from agents.retrieval.semantic import semantic_search  # noqa: E402
 from models.filter_extractor import MetadataFilters  # noqa: E402
 from scripts.eval_extractor import ALL_KEYS, TokenPacer, pct, predicted, rules_only, score_row  # noqa: E402
 
 EVAL_PATH = ROOT / "tests" / "prequal_eval.jsonl"
 RESULTS_DIR = ROOT / "logs"
-LABELS = ("route", "needs_retrieval", "intent", "persona", "language", "is_follow_up")
+LABELS = ("route", "needs_retrieval", "intent", "persona", "k", "language", "is_follow_up")
+ROUTER_KEYS = ("route", "needs_retrieval", "intent", "persona", "k")
 TARGETS = {"route": 0.95, "needs_retrieval": 0.97}
 EST_PREQUAL_TOKENS = 1150
 EST_EXTRACTOR_TOKENS = 6500
@@ -67,8 +70,13 @@ def rewrite_check(query_en: str, expected: dict) -> list:
 
 
 def label_ok(key: str, pred: dict, expected: dict) -> bool:
-    exp = expected[key]
-    return pred[key] in exp if isinstance(exp, list) else pred[key] == exp
+    exp = expected.get(key)          # only k may be missing: null expected
+    return pred.get(key) in exp if isinstance(exp, list) else pred.get(key) == exp
+
+
+def router_k(pq) -> object:
+    """The router's own k (None when it stated no count), not the defaulted pq.k."""
+    return pq.k if pq.meta.get("k_source") == "router" else None
 
 
 def ctx_for(row: dict) -> SessionContext:
@@ -81,23 +89,28 @@ async def run_row(row: dict, args, pacer: TokenPacer) -> dict:
     pq = await prequalify(row["query"], ctx_for(row), use_cache=False)
     used = sum(pq.meta.get("prompt_tokens", {}).values())
     out = {
-        "id": row["id"], "query": row["query"], "pred": {k: getattr(pq, k) for k in LABELS},
+        "id": row["id"], "query": row["query"],
+        "pred": {k: router_k(pq) if k == "k" else getattr(pq, k) for k in LABELS},
         "query_en": pq.query_en, "skip_metadata_filters": pq.skip_metadata_filters,
         "prequal_ms": pq.meta["latency_ms"]["total"], "call_ms": {k: v for k, v in pq.meta["latency_ms"].items() if k != "total"},
         "status": pq.meta["status"], "prompt_tokens": pq.meta.get("prompt_tokens", {}), "notes": pq.meta.get("notes", []),
     }
     if row.get("filters") is not None and args.extractor != "off":
+        # Same shape as the orchestrator: extractor || semantic search, then retrieval.
         t = time.perf_counter()
         if pq.skip_metadata_filters:
-            f = MetadataFilters()
+            f, sem = None, await semantic_search(pq.query_en)
         elif args.extractor == "llm":
-            f = await extract_filters(pq.query_en, use_cache=False)
+            f, sem = await asyncio.gather(extract_filters(pq.query_en, use_cache=False), semantic_search(pq.query_en))
             used += sum(f.meta.prompt_tokens.values())
         else:
-            f = rules_only(pq.query_en, [])
+            f, sem = rules_only(pq.query_en, []), await semantic_search(pq.query_en)
         out["extractor_ms"] = round((time.perf_counter() - t) * 1000, 1)
-        found = retrieve(f, pq.query_en)
-        out["retrieval_ms"] = found.latency_ms
+        found = retrieve(f, sem, pq.query_en, pq.intent, pq.k)
+        out["retrieval_ms"] = found.meta["latency_ms"]["total"]
+        out["semantic"] = sem.status
+        out["retrieved"] = found.handles[:5]
+        f = f or MetadataFilters()
         out["filters"] = predicted(f)
         out["extractor_calls"] = f.meta.calls
     if used:
@@ -186,7 +199,7 @@ def score(rows: list, results: dict, args) -> None:
         if path_ms:
             p95p = pct(path_ms, 95)
             note = "" if args.extractor == "llm" else "  (extractor ran on rules, not the LLM: not a real path time)"
-            print(f"products_only path (prequal+extractor+retrieval): p50 {pct(path_ms, 50):.0f} ms, p95 {p95p:.0f} ms"
+            print(f"products_only path (prequal+extractor||semantic+retrieval): p50 {pct(path_ms, 50):.0f} ms, p95 {p95p:.0f} ms"
                   f"   target p95<=3000 {'PASS' if p95p <= 3000 else 'FAIL'}{note}")
     print(f"call statuses: {dict(statuses)}")
     if tokens:
@@ -216,7 +229,7 @@ async def run(args) -> int:
         results = saved
         for res in results.values():    # re-apply the current code-side router checks
             if res["status"].get("router") in ("ok", "fallback_model"):
-                routed, _ = validate_route({k: res["pred"][k] for k in ("route", "needs_retrieval", "intent", "persona")})
+                routed, _ = validate_route({k: res["pred"].get(k) for k in ROUTER_KEYS})
                 res["pred"].update(routed)
         if args.extractor == "rules":   # re-run the offline extractor on the saved rewrites
             for row in rows:

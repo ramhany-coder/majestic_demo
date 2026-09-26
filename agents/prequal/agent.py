@@ -9,6 +9,10 @@ the stage returns a usable result even when both models are down. The
 optional `on_rewrite` hook fires as soon as the rewriter returns, before the
 router has finished; the orchestrator uses it to start the extractor
 speculatively (PREQUAL_SPECULATIVE_EXTRACTOR).
+
+Greetings, thanks and goodbyes end the graph here (PREQUAL_SMALL_TALK_END):
+result.end is True and result.reply holds the answer. A message made only of
+such words makes no LLM call; a router intent=greeting ends it after the calls.
 """
 
 import asyncio
@@ -23,6 +27,8 @@ from agents.prequal.rewriter import rewrite, rewrite_default
 from agents.prequal.router import route
 from agents.prequal.schemas import ROUTER_DEFAULT
 from agents.prequal.session_context import SessionContext, trim_history
+from agents.prequal.small_talk import (is_small_talk, small_talk_language, small_talk_query_en,
+                                        small_talk_reply)
 from config import settings
 from models.prequal import PrequalResult
 
@@ -97,7 +103,19 @@ def warm_up() -> None:
             client_llm.get_cached_model(router, model, **route_kwargs(r, max_tokens))
 
 
+def resolve_k(k: Optional[int]) -> int:
+    """null (not stated, or the router failed) -> RETRIEVAL_K_DEFAULT; capped at RETRIEVAL_K_MAX."""
+    return min(k if isinstance(k, int) and k >= 1 else settings.RETRIEVAL_K_DEFAULT, settings.RETRIEVAL_K_MAX)
+
+
+def _ends_turn(rt: CallResult) -> bool:
+    return (settings.PREQUAL_SMALL_TALK_END and rt.data["intent"] == "greeting"
+            and not rt.data["needs_retrieval"])
+
+
 def _build(message: str, rw: CallResult, rt: CallResult, total_ms: float) -> PrequalResult:
+    router_k = rt.data.get("k")
+    end = _ends_turn(rt)
     return PrequalResult(
         query_original=message,
         query_en=rw.data["query_en"],
@@ -107,10 +125,14 @@ def _build(message: str, rw: CallResult, rt: CallResult, total_ms: float) -> Pre
         needs_retrieval=rt.data["needs_retrieval"],
         intent=rt.data["intent"],
         persona=rt.data["persona"],
+        k=resolve_k(router_k),
         skip_metadata_filters=rw.data.get("skip_metadata_filters", False),
+        end=end,
+        reply=small_talk_reply(message, rw.data["language"]) if end else None,
         meta={
             "latency_ms": {"rewriter": rw.latency_ms, "router": rt.latency_ms, "total": total_ms},
             "status": {"rewriter": rw.status, "router": rt.status},
+            "k_source": "router" if router_k else "default",
             "routes": {r.key: r.route for r in (rw, rt) if r.route},
             "prompt_tokens": {r.key: r.prompt_tokens for r in (rw, rt) if r.prompt_tokens},
             "notes": [f"{r.key}: {n}" for r in (rw, rt) for n in r.notes],
@@ -119,12 +141,25 @@ def _build(message: str, rw: CallResult, rt: CallResult, total_ms: float) -> Pre
     )
 
 
+def _small_talk_result(message: str, total_ms: float) -> PrequalResult:
+    language = small_talk_language(message)
+    return PrequalResult(
+        query_original=message, query_en=small_talk_query_en(message), language=language,
+        is_follow_up=False, route="needs_response", needs_retrieval=False, intent="greeting", persona="unknown",
+        k=resolve_k(None), end=True, reply=small_talk_reply(message, language),
+        meta={"latency_ms": {"rewriter": 0.0, "router": 0.0, "total": total_ms},
+              "status": {"rewriter": STATUS_SKIPPED, "router": STATUS_SKIPPED}, "k_source": "default",
+              "routes": {}, "prompt_tokens": {}, "notes": ["small talk"], "cached": False},
+    )
+
+
 def _empty_message_result(message: str) -> PrequalResult:
     return PrequalResult(
         query_original=message, query_en="", language="en", is_follow_up=False,
         route="needs_response", needs_retrieval=False, intent="other", persona="unknown",
+        k=resolve_k(None),
         meta={"latency_ms": {"rewriter": 0.0, "router": 0.0, "total": 0.0},
-              "status": {"rewriter": STATUS_SKIPPED, "router": STATUS_SKIPPED},
+              "status": {"rewriter": STATUS_SKIPPED, "router": STATUS_SKIPPED}, "k_source": "default",
               "routes": {}, "prompt_tokens": {}, "notes": ["empty message"], "cached": False},
     )
 
@@ -140,6 +175,10 @@ async def prequalify(message: Optional[str], ctx: Optional[SessionContext] = Non
     ctx = ctx or SessionContext()
     if not message:
         return _empty_message_result(message)
+    if settings.PREQUAL_SMALL_TALK_END and is_small_talk(message):
+        res = _small_talk_result(message, round((time.perf_counter() - start) * 1000, 1))
+        logger.info("[prequal] small talk, ending turn: %r", message)
+        return res
 
     key = _cache_key(session_id, message, ctx) if session_id and use_cache else None
     if key is not None:
@@ -159,8 +198,9 @@ async def prequalify(message: Optional[str], ctx: Optional[SessionContext] = Non
     if rw.degraded and rt.degraded:
         logger.error("[prequal] both calls failed; using defaults. rewriter=%s router=%s", rw.notes, rt.notes)
     else:
-        logger.info("[prequal] %.0fms route=%s intent=%s status=%s query_en=%r", res.meta["latency_ms"]["total"],
-                    res.route, res.intent, res.meta["status"], res.query_en)
+        logger.info("[prequal] %.0fms route=%s intent=%s k=%d end=%s status=%s query_en=%r",
+                    res.meta["latency_ms"]["total"], res.route, res.intent, res.k, res.end, res.meta["status"],
+                    res.query_en)
     if key is not None and not (rw.degraded or rt.degraded):
         _cache.set(key, res.model_copy(deep=True))
     return res

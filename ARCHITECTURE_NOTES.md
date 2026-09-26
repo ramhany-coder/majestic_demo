@@ -148,6 +148,10 @@ no code changes are needed.
 
 ## 5. Hand-off contract for the retrieval layer
 
+The retrieval agent (section 10) implements this contract. It extends the
+relaxation order, and replaces `matched_handles` with its own name search.
+
+
 `MetadataFilters` maps onto product fields through
 `metadata_catalog.json -> field_map`. Retrieval should apply it as follows.
 
@@ -306,6 +310,10 @@ Each call catches its own errors, so one failure never cancels the other.
 
 ### Retrieval and responder
 
+The retrieval described here was a stand-in. It is replaced by the retrieval
+agent in section 10.
+
+
 - **Retrieval.** The project had no retrieval layer. `agents/retrieval`
   applies the section 5 contract to the in-memory catalog:
   - AND across keys, OR within a key.
@@ -437,3 +445,361 @@ How to read these results:
 
   One full turn uses about 7k input tokens (prequal about 1.4k, the extractor
   about 6k), which is nearly the free tier's 7,000 per minute.
+
+## 10. Retrieval agent (exact filters + name BM25 + semantic search)
+
+Retrieval picks the top `k` products for one request. It uses no LLM: it
+combines three deterministic signals over the in-memory catalog, and replaces
+the stand-in `agents/retrieval/retrieval.py` described in section 9.
+
+| Signal | Input | Method |
+|---|---|---|
+| Exact filters | the extractor's catalog keys | inverted index per key, set intersection |
+| Name match | the extractor's `name_en` / `name_ar` | BM25 over character bigrams, plus a Dice check |
+| Semantic | the rewriter's `query_en` | cosine similarity against each product's `description` embedding |
+
+### Where it runs
+
+```
+prequalify(message)  -- rewriter || router  ->  query_en, route, needs_retrieval, intent, k
+  needs_retrieval = true:
+    asyncio.gather(extract_filters(query_en), semantic_search(query_en))   -> filters, sem
+    retrieve(filters, sem, query_en, intent, k)                            -> RetrievalResult
+      products_only, products found, nothing relaxed  -> templated intro + cards (final, no LLM)
+      otherwise                                       -> respond(ctx + the whole RetrievalResult)
+```
+
+- The semantic search runs in parallel with the extractor. With
+  `PREQUAL_SPECULATIVE_EXTRACTOR=true` both start when the rewriter returns,
+  and both are cancelled if the router then says `needs_retrieval=false`.
+- When the rewriter failed (`skip_metadata_filters`), the extractor is
+  skipped. The semantic search still runs on the raw message.
+
+### Module layout
+
+```
+agents/retrieval/
+  index_builder.py  product pool, inverted indexes, name indexes, embedding text + disk cache
+  name_search.py    name normalization (en/ar), bigram tokenizer, BM25 + Dice acceptance
+  semantic.py       product embedding matrix, query embedding (timeout, LRU), cosine scores
+  filters.py        exact filter step: OR within a key, AND across keys, relaxation, bundle rule
+  fusion.py         scores the candidate set: semantic + boosts, tie-breakers
+  agent.py          retrieve(filters, sem, query_en, intent, k) -> RetrievalResult
+models/retrieval.py RetrievedProduct, RetrievalResult
+llm/embeddings.py   embedding client factory ("router:model" routes, like llm_models.py)
+```
+
+### Embedding client (proposal)
+
+Neither this project nor the drug assistant has an embedding client or a
+vector store, and the only configured provider (Groq) has no embeddings
+endpoint. So:
+
+- **`llm/embeddings.py`** builds a LangChain `Embeddings` object from a
+  route, the same way `llm_models.py` builds chat models:
+  - `hf:<model>`: a local sentence-transformers model. This needs no key.
+  - `gpt:<model>`, `gemini:<model>` and `ollama:<model>`: those providers'
+    LangChain embedding classes, whose packages are already in
+    `requirements.txt`.
+- **Default: `hf:sentence-transformers/all-MiniLM-L6-v2`.** It is small
+  (22M parameters, 384 dimensions), English, and runs on CPU in a few
+  milliseconds per query. `RETRIEVAL_EMBEDDING_ROUTE` switches the model with
+  no code changes.
+- **No vector database.** 108 products fit in one numpy matrix.
+- **Imports are lazy.** Only the semantic index loads `sentence_transformers`
+  (and so torch). The unit tests use a fake embedder, so they stay offline.
+
+### Model and embedding caching (taken from the drug assistant)
+
+| Drug-assistant piece | What it does there | Here |
+|---|---|---|
+| `model_manager.py` | Local-cache-first spaCy install. A `.download_complete` marker under `models/<name>/` is trusted only with a live check that the model is installed; the download runs only when missing | `model_manager.py::ensure_hf_model_downloaded`, detailed below |
+| `agents/meta_data_fiter/engine_registry.py` | Search index built once per process, behind an `_UNSET` singleton. One pickle, `cache/<name>_v{_SCHEMA_VERSION}_{sha256(data)[:16]}`. Stale files are deleted on rebuild, a corrupt file rebuilds, and `warm_up_*()` runs in the lifespan | `agents/retrieval/embedding_registry.py`, detailed below |
+| `agents/image_pii/helpers.py` | Slow engine init in a background daemon thread, started on first use, with a bounded wait per call. Not ready means that call skips it without giving up; a failure is cached | `agents/retrieval/semantic.py::_ModelLoader`, detailed below |
+
+**`model_manager.py`**
+
+- **Where the model lives.** An `hf:` model is downloaded once into
+  `RETRIEVAL_EMBEDDING_MODEL_DIR/<repo slug>/` and loaded from that path.
+  sentence-transformers makes no Hub call on restart, and loading works
+  offline; this was checked with `HF_HUB_OFFLINE=1`.
+- **The marker.** It counts only if `config.json` and the weights are also
+  present.
+- **What is downloaded.** ONNX, OpenVINO, TF, Rust and duplicate `.bin`
+  weights are skipped. The default repo is about 1 GB in full, and 88 MB of it
+  is what sentence-transformers loads.
+
+**`embedding_registry.py`**
+
+- **One file.** The product matrix is saved as
+  `cache/product_embeddings_v{_SCHEMA_VERSION}_{model}_{sha256(catalog)[:16]}.npz`.
+  `np.savez`/`np.load(allow_pickle=False)` is used instead of pickle, since
+  the data is just two arrays.
+- **Bump `_SCHEMA_VERSION` when `embedding_text()` changes.** It sits next to
+  that function for this reason: the key hashes only the data, so without the
+  version a code change would load stale vectors.
+
+**`semantic.py::_ModelLoader`**
+
+- **Background load.** The model and matrix load in a daemon thread. Each
+  request waits at most its semantic timeout (1.5 s); if the model isn't
+  ready, that request gets status `loading` (fallback `no_semantic`) and a
+  later request uses the finished load.
+- **Failures are permanent.** A failed load is cached until restart (status
+  `failed`), as in the drug assistant.
+- **Warm-up.** `warm_up()` waits up to `RETRIEVAL_MODEL_INIT_TIMEOUT_S` (60 s).
+- **Switch.** `RETRIEVAL_SEMANTIC_ENABLED=false` turns semantic search off,
+  like `ENABLE_IMAGE_PII`: no model loads.
+
+**Startup cost on this machine** (shared with other sessions, so slower than
+an idle host):
+
+- Cold first start: 45 s (download plus torch import).
+- Later starts: 18–40 s, almost all of it the torch import.
+- The product matrix loads from its file in milliseconds.
+
+### Index (built once per process)
+
+- **Product pool.** `products` only. Bundles keep `product_kind = bundle`,
+  and are also indexed under each of their `contains_product_types`.
+- **Inverted indexes.** Filter key → value → set of handles, following
+  `field_map`: `hero_ingredient` is `hero_ingredient.name`, and `ingredients`
+  is `ingredients_canonical`.
+- **Two name indexes.** `rank_bm25.BM25Okapi` over character bigrams with
+  boundary markers, one index for `name` and one for `name_ar`.
+  - Normalization strips sizes (`120ml`, `50 gm`, `30 مل`), symbols
+    (`®`, `™`, `×`) and punctuation.
+  - Arabic folds أ/إ/آ → ا, ة → ه, ى → ي and the four "v" letters
+    (ڤ ڨ ڈ ڄ) → ف, and drops tashkeel and tatweel.
+  - `get_scores` loops over every name in Python for each query bigram, so
+    each bigram's per-name score vector is precomputed from the fitted
+    model. A name query then costs microseconds instead of about 1.3 ms, and
+    the scores are identical to the library's: the largest difference over
+    all 1,063 typo queries was 3.6e-14.
+
+### The three steps
+
+- **Exact filters** (`filters.py`):
+  - OR within a key, AND across keys, `ingredients.include` all-of,
+    `ingredients.exclude` any-of. Exclude is applied in every fallback.
+  - On an empty candidate set, keys are dropped one at a time:
+    `product_form → suitable_for → concerns → product_group → category →
+    hero_ingredient → ingredients.include → product_type → brand`.
+  - With every key dropped: the pool minus excluded products, and
+    `fallback = "semantic_only"`.
+  - Bundle rule: bundles stay only for product_type `bundle`, group
+    `Bundles & Offers`, a bundle matched by name, or intent `price_offer`.
+- **Names** (`name_search.py`):
+  - A hit needs BM25 ≥ 0.8 × the top score for that queried name and bigram
+    Dice ≥ 0.35. Up to 10 hits are kept per name.
+  - `name_en[i]` and `name_ar[i]` are the same name in two scripts. A name is
+    unresolved only when neither form hits.
+  - Queries are routed by script, so Arabic text in `name_en` still reaches
+    the Arabic index.
+- **Semantic + fusion** (`semantic.py`, `fusion.py`):
+  - `final = cosine + boosts`, with the weights in `RETRIEVAL_FUSION_WEIGHTS`.
+  - Out-of-stock products always rank below in-stock ones.
+  - Tie-breakers: name score, then lower price, then handle.
+  - The query embedding has a 1.5 s timeout and an LRU cache (`TTLCache`).
+
+### Output contract and hand-off
+
+`RetrievalResult` (`models/retrieval.py`) follows the plan's contract, with
+two additions:
+
+- `RetrievedProduct.url_ar`, which the old cards had.
+- `meta`:
+  - `latency_ms`
+  - `semantic` (the status)
+  - `fallbacks`, listing both fallbacks when both happen; `fallback` holds the
+    first, and `no_semantic` wins.
+  - `relaxed_values`, the requested values of each relaxed key, so the
+    responder can say "no spray found, here are gels"
+  - `bundles_allowed`
+  - `excluded_count`
+  - `filters_skipped`
+
+Orchestrator hand-off:
+
+| Case | Result |
+|---|---|
+| `products_only`, products found, nothing relaxed | Templated intro + cards. Final. |
+| `products_only`, nothing found | Responder, reason `no_results` |
+| `products_only`, some keys relaxed | Responder, reason `relaxed` |
+| `needs_response` | Responder, with the whole `RetrievalResult` in `ResponderContext.retrieval` |
+
+### Router change (`k`)
+
+- **Schema.** `"k": {"type": ["integer","null"], "minimum": 1, "maximum": 20}`
+  is required. Groq's strict mode accepts it; both configured routes were
+  checked live before the change.
+- **Validation.** A bad `k` never fails the router call, because route and
+  intent matter more:
+  - null, 0, negative or non-numeric → null (the default applies)
+  - above 20 → 20
+  - `"4"` or `4.0` → 4
+- **`PrequalResult.k`.** The router's `k`, else `RETRIEVAL_K_DEFAULT` (10),
+  capped at `RETRIEVAL_K_MAX` (20). `meta.k_source` is `router` or `default`.
+- **Prompt.** The plan's rule line and Example 3 are in verbatim. Examples 1
+  and 2 gained `"k":null`.
+  - One clause was added after the first live run: `"something" (7aga,
+    حاجة) is not a count`. The router had read "3ayez 7aga lel 2eshra" as
+    k=1, which would show a single product.
+  - The prompt is now 630 tiktoken tokens, up from ~496; its budget test is
+    now 650.
+
+### Deviations from the plan, and why
+
+- **Location.** The plan suggested a top-level `retrieval/` package. The
+  modules live in `agents/retrieval/` and `models/retrieval.py`, following
+  this project's layout. The stand-in `agents/retrieval/retrieval.py` was
+  removed.
+- **Caching follows the drug assistant** (see "Model and embedding caching"
+  above). The plan's three files (`embeddings.npy`, `handles.json`, model
+  name) became one versioned `.npz`, with the model and the catalog hash in
+  its name.
+- **`matched_handles` is no longer used by retrieval.** The plan's name step
+  (bigram BM25 on `name_en` / `name_ar`) replaces it. The extractor still
+  fills it, and its eval still scores it.
+- **Unmatched concerns boost too.** `unmatched.concerns` found in the
+  description adds `unmatched_concern` (0.05). The plan's formula lists only
+  unmatched include terms, but the extractor's hand-off contract (section 5)
+  says unmatched concerns boost.
+- **More free-of phrasings.** Besides "<term>-free" and "free from <term>",
+  these also count: "free of", "contains no", "without" (within one
+  sentence, so lists like "free from ammonia, aluminum, and alcohol" match),
+  and "no / 0% <term>". Plurals match both ways ("parabens" finds
+  "paraben").
+- **Precision@k** is the relevant share of the returned list, not of `k`
+  slots. **Recall@k** divides by `min(|relevant|, k)`. Otherwise a request
+  with 2 relevant products and k=10 could never exceed 0.2 precision, and a
+  k=3 request for 6 relevant products could never reach recall 1.0.
+
+### Dice threshold sweep (a recommendation, not applied)
+
+The plan's Dice floor, 0.35, lets through long names that share only common
+bigrams with the query: "Nonexistent Thing" matches a Vacation deodorant at
+exactly 0.35. The sweep used the 1,063 generated typo queries, plus 36 names
+that are not in the catalog (competitor products, invented Majestic names).
+
+| Dice floor | Typo top-1 | Typo top-3 | False accepts (of 36) |
+|---|---|---|---|
+| 0.35 (plan, default) | 0.956 | 0.994 | 23 |
+| 0.40 | 0.957 | 0.994 | 20 |
+| 0.45 | 0.959 | 0.995 | 14 |
+| 0.50 | 0.962 | 0.994 | 13 |
+
+- **A higher floor costs no typo recall.** Top-1 even improves, because noisy
+  accepts that outranked the right product disappear.
+- **Some false accepts can't be fixed with bigrams.** The ones left at 0.5
+  are brand plus real words ("Vacation Retinol Night Cream" → Uni-White
+  Night Cream).
+- **Risk is lower in practice.** The extractor's grounding already drops
+  names without a Majestic brand or product line, so competitor names rarely
+  reach retrieval.
+- **Recommendation:** `RETRIEVAL_NAME_DICE_MIN=0.45`. It was left at the
+  plan's 0.35 pending a decision.
+
+### Evaluation (2026-09-26)
+
+**Retrieval** (`python -m scripts.eval_retrieval`, 56 cases in
+`tests/retrieval_eval.jsonl`, no LLM). Relevance was labelled by judgment,
+not by what the filters return, so exact-match limits show up as misses.
+
+| Run | precision@k | recall@k | MRR | Forbidden products returned |
+|---|---|---|---|---|
+| Semantic on (all-MiniLM-L6-v2) | 0.874 | 0.949 | 0.960 | 0 rows |
+| Semantic off (`--no-semantic`) | 0.865 | 0.935 | 0.955 | 0 rows |
+
+- **The plan's cases:**
+  - hair serum without silicone: exact
+  - sunscreen spray for oily skin: form relaxed, recall 0.75 (see limits)
+  - pregnant, no retinol or salicylic acid: exact, nothing forbidden
+  - compare, deodorant line and k=3: all perfect
+- **Semantic adds little where filters exist** (+0.014 recall). It matters
+  in the broad and filter-less rows.
+- **Misses are exact-match limits, not bugs:**
+  - r02: the "all skin types" spray isn't labeled oily skin
+  - r21: only one balm is labeled "dry lips"
+  - r22: the caffeine serum is typed eye serum, not eye cream
+  - r56: a wrongly extracted suitable_for makes relaxation drop product_form
+    first
+  - r47: raw Arabic with no filters, when the rewriter failed. The English
+    model scores 0 there.
+
+**Latency** (offline):
+
+| Measure | p50 | p95 | Target |
+|---|---|---|---|
+| Filters + names + fusion | 0.34 ms | 1.9 ms | ≤ 10 ms |
+| Semantic search (uncached query embedding, CPU) | 21 ms | 35 ms | ≤ 300 ms |
+
+Before the precomputed BM25 vectors, the retrieval p95 was 9.0 ms.
+
+**Name typo test** (`python -m scripts.name_typos`):
+
+- 1,063 generated queries: English and Arabic, 5 variants per name (delete,
+  swap, replace, 2 edits, brand dropped).
+- **top-1 0.956** (target ≥ 0.95) and **top-3 0.994** (target ≥ 0.99).
+- All 5 real misspellings from the plan resolve.
+- The misses:
+  - bundles whose names contain the single product's name, such as
+    "... Serum + 1000 Laser Pulses Card"
+  - very short names with 2 edits
+
+**Router `k`** (live, configured primary qwen/qwen3.8-27b, 7 new
+`count`-tagged rows in `tests/prequal_eval.jsonl`):
+
+- 7/7 after the "something" clause (6/7 before):
+  - "show me 3", "أحسن ٢", "top five", "تلاتة" and "2 lip balm" are read as
+    counts.
+  - "wa7ed bas" → 1.
+  - "3ayez 7aga" → null.
+- A full dev-set regression run of the router was started. It was stopped
+  after 8 rows because qwen hit the account's 200k tokens-per-day cap, so the
+  run would have measured the fallback model.
+- **Still to do:** re-run `python -u -m scripts.eval_prequal` once the cap
+  resets, to confirm route and intent accuracy with the new k line.
+
+**End-to-end smoke test** (`python -m scripts.smoke_e2e`, live): six raw
+Arabic, Arabizi and English messages, each through prequal → extractor ∥
+semantic → retrieval.
+
+- **6/6 turns as expected:** right k, an expected product in the top 3,
+  nothing forbidden.
+- **The products_only path** (prequal + extractor ∥ semantic + retrieval):
+  1.56–2.37 s, **p95 2.37 s** against a 3 s target.
+- **Caveat: these times are pessimistic.** qwen was over its daily cap, so
+  most calls went to gpt-oss-20b after a 429 round trip (118 rate-limit
+  errors in the log).
+- **Semantic always finished inside the extractor's time,** so it added no
+  wall-clock time. It took 100–680 ms, not 35 ms, while the extractor's 10
+  calls ran.
+- **Retrieval measured 0.6–26 ms of wall time inside the live pipeline,**
+  against 0.3–3 ms of isolated compute. Timing retrieval directly after an
+  embedding call gave the same median (0.67 ms), so the spikes look like
+  machine load and GC pauses. Six sessions share this machine.
+- **The rewriter's Arabizi misreadings** ("3ara2" sweat → "oily skin",
+  "2eshra" dandruff → "face") show up downstream as relaxed filters. That is
+  the rewriter limit noted in section 9, not a retrieval one.
+
+### Known limits
+
+- **"all skin types" does not satisfy a specific skin type.** Exact match
+  follows the plan, so the Sunscreen Spray (all skin types) is missing from
+  "sunscreen spray for oily skin". Treating `all skin types` as matching
+  every skin-type value would fix r02 and similar cases. It's a one-line
+  change in `filters.key_matches`.
+- **Relaxation drops by key order, not by key confidence.** A wrong
+  suitable_for is dropped only after product_form, as in r56.
+- **The embedding model is English.** The rewriter-failed path embeds the raw
+  message, so Arabic or Arabizi text scores near zero there. A multilingual
+  model (for example `paraphrase-multilingual-MiniLM-L12-v2`, via
+  `RETRIEVAL_EMBEDDING_ROUTE`) would help that path only.
+- **The session remembers 5 of the 10 products shown**
+  (`PREQUAL_LAST_PRODUCTS`), so "the seventh one" can't be resolved.
+- **A failed model load is not retried until restart**, as in the drug
+  assistant. For example, a network error during the first download leaves
+  semantic search off until the next start.
+- **The caches are per host.** Each worker keeps its own `models/embeddings/`
+  and `cache/` copy.

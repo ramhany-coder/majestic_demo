@@ -23,6 +23,9 @@ jobs:
           cache: pip
           cache-dependency-path: requirements.txt
 
+      # requirements.txt pins a CPU-only torch wheel on Linux / Python 3.12
+      # (the default Linux wheel pulls several GB of CUDA libraries). The tests
+      # use a fake embedder.
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
@@ -34,3 +37,6 @@ jobs:
 
       - name: Check generated catalogs are up to date
         run: python -m scripts.build_catalogs --check
+
+      - name: Check the widget's generated files and token contrast
+        run: python -m scripts.build_web --check
