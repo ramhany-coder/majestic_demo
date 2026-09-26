@@ -1,0 +1,23 @@
+# JSON / configuration
+python-dotenv>=1.2.3
+
+# Data validation
+pydantic>=2.13.4
+typing_extensions>=4.16.0
+
+# Fuzzy string matching (filter_extractor rule-based fallback, name matching)
+rapidfuzz>=3.14.5
+
+# LLM clients (same stack as the drug-assistant project)
+langchain-core>=1.6.0
+langchain-anthropic>=1.1.0
+langchain-groq>=1.1.3
+langchain-openai>=1.6.0
+langchain-google-genai>=4.3.5
+langchain-ollama>=1.1.0
+
+# Token counting for prompt-budget tests (offline estimate)
+tiktoken>=0.7.0
+
+# Testing
+pytest>=9.1.1

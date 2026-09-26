@@ -1,0 +1,1064 @@
+{
+  "source": "https://e-majestic.com",
+  "scraped_at": "2026-09-26T03:00:00+03:00",
+  "product_count": 108,
+  "allowed_values": {
+    "brand": [
+      "Capixy",
+      "Femi9",
+      "InShape",
+      "Methytral",
+      "Movelex",
+      "Pirlome",
+      "Pregnastep",
+      "Soralone",
+      "Vacation"
+    ],
+    "category": [
+      "Hair Care",
+      "Health & Support",
+      "Personal Care",
+      "Skin Care"
+    ],
+    "product_group": [
+      "Body Care",
+      "Bundles & Offers",
+      "Deodorants & Antiperspirants",
+      "Eye & Lash Care",
+      "Face Care",
+      "Hair & Scalp Care",
+      "Intimate Care",
+      "Joint & Muscle Care",
+      "Lip Care",
+      "Skin Repair & Healing",
+      "Sun Care",
+      "Supplements"
+    ],
+    "product_type": [
+      "acne treatment",
+      "anti-aging cream",
+      "antiperspirant",
+      "body lotion",
+      "body scrub",
+      "bundle",
+      "cleanser",
+      "conditioner",
+      "deodorant",
+      "eye cream",
+      "eye serum",
+      "face serum",
+      "hair cream",
+      "hair mask",
+      "hair oil",
+      "hair serum",
+      "hair tonic",
+      "hair vials",
+      "hair, skin & nails supplement",
+      "hand cream",
+      "heat protectant",
+      "intimate wash",
+      "joint pain relief",
+      "joint supplement",
+      "lash serum",
+      "lip balm",
+      "moisturizer",
+      "nipple cream",
+      "prenatal supplement",
+      "scalp treatment",
+      "scar treatment",
+      "shampoo",
+      "skin repair cream",
+      "skin repair spray",
+      "stretch mark cream",
+      "sunscreen",
+      "toner",
+      "whitening cream",
+      "wound & burn care"
+    ],
+    "product_form": [
+      "balm",
+      "capsules",
+      "cream",
+      "cream gel",
+      "foam",
+      "gel",
+      "jelly cream",
+      "kit",
+      "leave-in cream",
+      "liquid",
+      "lotion",
+      "micellar water",
+      "milk",
+      "oil",
+      "roll-on",
+      "scrub",
+      "serum",
+      "spray",
+      "tablets",
+      "tinted cream",
+      "vials"
+    ],
+    "concerns": [
+      "acne",
+      "aging",
+      "barrier repair",
+      "burns",
+      "damaged hair",
+      "dandruff",
+      "dark circles",
+      "dehydration",
+      "dry lips",
+      "dryness",
+      "enlarged pores",
+      "excess sebum",
+      "frizz",
+      "hair loss",
+      "hair thinning",
+      "healing",
+      "hyperpigmentation",
+      "intimate hygiene",
+      "joint pain",
+      "lash growth",
+      "muscle pain",
+      "post-acne marks",
+      "post-laser care",
+      "pregnancy",
+      "puffiness",
+      "rough skin",
+      "scars",
+      "sensitivity",
+      "stretch marks",
+      "sun protection",
+      "sweating",
+      "underarm odor",
+      "uneven tone",
+      "weak nails",
+      "wound healing",
+      "wrinkles"
+    ],
+    "suitable_for": [
+      "acne-prone skin",
+      "all skin types",
+      "body",
+      "breastfeeding",
+      "combination skin",
+      "dry skin",
+      "eye area",
+      "hands",
+      "intimate area",
+      "lips",
+      "oily skin",
+      "post-laser",
+      "pregnancy",
+      "scalp",
+      "sensitive skin",
+      "underarm",
+      "unisex"
+    ],
+    "hero_ingredient": [
+      "Argireline",
+      "Caffeine + EGCG",
+      "Cica (Centella Asiatica)",
+      "Copper Peptide",
+      "Glycolic Acid",
+      "Hyaluronic Acid",
+      "Niacinamide + Zinc PCA",
+      "R2CP Complex (Redensyl®, Capixyl®, Procapil®, Resveratrol)",
+      "Retinol",
+      "Urea",
+      "Vitamin C"
+    ],
+    "ingredients": [
+      "Acetyl Glucosamine",
+      "Acetyl Hexapeptide-1",
+      "Acetyl Tetrapeptide-3",
+      "Acnacidol",
+      "Allantoin",
+      "Almond Oil",
+      "Aloe Vera",
+      "Alpha Arbutin",
+      "Ama Oil",
+      "Aminexil",
+      "Anagain",
+      "Apiscalp",
+      "Apple Cider Vinegar",
+      "Aquaxyl",
+      "Argan Oil",
+      "Arnica",
+      "Asiatic Acid",
+      "Avocado Oil",
+      "Azelaic Acid",
+      "Baicapil",
+      "Baobab Oil",
+      "Beeswax",
+      "Beta Carotene",
+      "Beta Sitosterol",
+      "Bifida Ferment Lysate",
+      "Biotin",
+      "Biotinoyl Tripeptide-1",
+      "Biotinoyl Tripeptide-35",
+      "Black Pepper",
+      "Black Seed (Nigella Sativa)",
+      "Blueberry Extract",
+      "Boron Nitride",
+      "Boswellia Extract",
+      "Botanical Hair-Minimizing Complex",
+      "Bromelain",
+      "Butylene Glycol",
+      "Caffeine",
+      "Calcium",
+      "Calcium Gluconate",
+      "Calendula",
+      "Camphor Oil",
+      "Canola Oil",
+      "Capixyl",
+      "Capric/Caprylic Triglyceride",
+      "Castor Oil",
+      "Caviar Extract",
+      "Centella Asiatica (Cica)",
+      "Ceramides",
+      "Chamomile Oil",
+      "Chlorella Extract",
+      "Chondroitin Sulphate",
+      "Chromium",
+      "Citric Acid",
+      "Citrus Bioflavonoid Extract",
+      "Clove",
+      "Cocamide DEA",
+      "Cocamidopropyl Betaine",
+      "Coconut Oil",
+      "Coenzyme Q10",
+      "Collagen",
+      "Collagen Type II",
+      "Collagenase",
+      "Colloidal Oatmeal",
+      "Copper",
+      "Copper Tripeptide-1",
+      "Crambe Maritima Leaf Extract",
+      "Cyclopentasiloxane",
+      "Decyl Glucoside",
+      "Defenscalp",
+      "Dextran",
+      "Diaminopyrimidine Oxide",
+      "Dimethyl Isosorbide",
+      "Ectoin",
+      "EGCG",
+      "Eucalyptus Oil",
+      "Eyeliss",
+      "Folic Acid",
+      "Gaultheria Procumbence Leaf Extract",
+      "Ginkgo Biloba",
+      "Ginseng",
+      "Gluconolactone",
+      "Glucosamine",
+      "Glutathione",
+      "Glycerin",
+      "Glycol Distearate",
+      "Glycolic Acid",
+      "Gossypium Herbaceous Root Extract",
+      "Grape Seed Extract",
+      "Green Tea Extract",
+      "Heparin",
+      "Hibiscus Extract",
+      "Honey",
+      "Horsetail",
+      "HyaCare Filler CL MB",
+      "Hyaluronic Acid",
+      "Hydrolyzed Elastin",
+      "Hydrolyzed Jojoba Protein",
+      "Hydrolyzed Vegetable Protein",
+      "Hydrolyzed Whey Protein",
+      "Hydroviton Plus",
+      "Hydroxyethylcellulose",
+      "Inositol",
+      "Inulin",
+      "Iodine",
+      "Iron",
+      "Jojoba Oil",
+      "Kaolin",
+      "Keratin",
+      "Kojic Acid",
+      "L-Arginine",
+      "L-Cysteine",
+      "Lactic Acid",
+      "Lactobacillus Ferment",
+      "Lanolin",
+      "Licorice Extract",
+      "Limonene",
+      "Lumiskin",
+      "Madecassic Acid",
+      "Madecassoside",
+      "Magnesium",
+      "Magnesium Sulfate",
+      "Mandelic Acid",
+      "Manganese",
+      "Marula Oil",
+      "Matricaria Extract",
+      "Matrixyl 3000",
+      "MDI Complex",
+      "Melanostatine 5 BG",
+      "Menthol",
+      "Methionine",
+      "Millet Seed Extract",
+      "Mint Mojito Complex",
+      "Moringa Oil",
+      "MSM",
+      "Neem Seed Oil",
+      "Niacinamide (Vitamin B3)",
+      "Olive Leaf Extract",
+      "Omega 3",
+      "Omega 6",
+      "Onion Extract",
+      "Palmitoyl Tetrapeptide-7",
+      "Palmitoyl Tripeptide-1",
+      "Panthenol (Vitamin B5)",
+      "Parsley Extract",
+      "PatcH2O",
+      "Peg-7 Glyceryl Cocoate",
+      "Pentavitin",
+      "Peppermint Oil",
+      "Peptides",
+      "Phenoxyethanol",
+      "Phyto Vie Defense",
+      "Pine Oil",
+      "Piroctone Olamine",
+      "Pisum Sativum Sprout Extract",
+      "Poloxamer 407",
+      "Polyquaternium-7",
+      "Prebiotics",
+      "Procapil",
+      "ProHydrolase",
+      "Propanediol",
+      "Propolis",
+      "Propylene Glycol",
+      "Pullulan",
+      "Pumpkin Seed Oil",
+      "Quinoa Peptides",
+      "Red Clover Extract",
+      "Redensyl",
+      "Regestril",
+      "Resveratrol",
+      "Retinol",
+      "Riboflavin",
+      "Rice Ferment Filtrate",
+      "Rice Oil",
+      "Rose Oil",
+      "Rosehip Oil",
+      "Rosemary",
+      "Saccharomyces Ferment",
+      "Salicylic Acid",
+      "Sandalwood",
+      "Saw Palmetto",
+      "Sclerotium Gum",
+      "Scutellaria Baicalensis Root Extract",
+      "Selenium",
+      "Sepiwhite MSH",
+      "Sesame Seed Extract",
+      "Seveov LG",
+      "Sh-Tripeptide-1",
+      "Shea Butter",
+      "Silicone",
+      "Silk Protein",
+      "Smectite",
+      "Snail Secretion Filtrate",
+      "Sodium Gluconate",
+      "Sodium Hydroxide",
+      "Soy Germ Extract",
+      "Soy Protein",
+      "Squalane",
+      "Sugar Crystals",
+      "SunCat MTA",
+      "Sunflower Seed Oil",
+      "Tea Tree Oil",
+      "Teflose",
+      "Thioglycerol",
+      "Thyme Extract",
+      "Thymol",
+      "Titanium Dioxide",
+      "Tranexamic Acid",
+      "Triclosan",
+      "Triethyl Citrate",
+      "Turmeric",
+      "Unisooth EG-28",
+      "Urea",
+      "Vitamin A",
+      "Vitamin B Complex",
+      "Vitamin B1",
+      "Vitamin B12",
+      "Vitamin B6",
+      "Vitamin C",
+      "Vitamin D3",
+      "Vitamin E",
+      "Vitamin K",
+      "Vitamin K2",
+      "Watermelon Extract",
+      "Watermelon Seed Oil",
+      "Wheat Germ Extract",
+      "Wheat Protein",
+      "White Tea Extract",
+      "Willow Bark Extract",
+      "Wintergreen Oil",
+      "Witch Hazel",
+      "Xanthan Gum",
+      "Yeast Protein",
+      "Zinc",
+      "Zinc Carbonate",
+      "Zinc Oxide",
+      "Zinc PCA"
+    ]
+  },
+  "counts": {
+    "brand": 9,
+    "category": 4,
+    "product_group": 12,
+    "product_type": 39,
+    "product_form": 21,
+    "concerns": 36,
+    "suitable_for": 17,
+    "hero_ingredient": 11,
+    "ingredients": 236
+  },
+  "hierarchy": {
+    "product_type": {
+      "acne treatment": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "anti-aging cream": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "antiperspirant": {
+        "product_group": [
+          "Deodorants & Antiperspirants"
+        ],
+        "category": [
+          "Personal Care"
+        ]
+      },
+      "body lotion": {
+        "product_group": [
+          "Body Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "body scrub": {
+        "product_group": [
+          "Body Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "bundle": {
+        "product_group": [
+          "Bundles & Offers"
+        ],
+        "category": [
+          "Hair Care",
+          "Health & Support",
+          "Skin Care"
+        ]
+      },
+      "cleanser": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "conditioner": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "deodorant": {
+        "product_group": [
+          "Deodorants & Antiperspirants"
+        ],
+        "category": [
+          "Personal Care"
+        ]
+      },
+      "eye cream": {
+        "product_group": [
+          "Eye & Lash Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "eye serum": {
+        "product_group": [
+          "Eye & Lash Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "face serum": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "hair cream": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair mask": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair oil": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair serum": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair tonic": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair vials": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "hair, skin & nails supplement": {
+        "product_group": [
+          "Supplements"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "hand cream": {
+        "product_group": [
+          "Body Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "heat protectant": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "intimate wash": {
+        "product_group": [
+          "Intimate Care"
+        ],
+        "category": [
+          "Personal Care"
+        ]
+      },
+      "joint pain relief": {
+        "product_group": [
+          "Joint & Muscle Care"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "joint supplement": {
+        "product_group": [
+          "Supplements"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "lash serum": {
+        "product_group": [
+          "Eye & Lash Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "lip balm": {
+        "product_group": [
+          "Lip Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "moisturizer": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "nipple cream": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "prenatal supplement": {
+        "product_group": [
+          "Supplements"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "scalp treatment": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "scar treatment": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "shampoo": {
+        "product_group": [
+          "Hair & Scalp Care"
+        ],
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "skin repair cream": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "skin repair spray": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "stretch mark cream": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "sunscreen": {
+        "product_group": [
+          "Sun Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "toner": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "whitening cream": {
+        "product_group": [
+          "Face Care"
+        ],
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "wound & burn care": {
+        "product_group": [
+          "Skin Repair & Healing"
+        ],
+        "category": [
+          "Health & Support"
+        ]
+      }
+    },
+    "product_group": {
+      "Body Care": {
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "Bundles & Offers": {
+        "category": [
+          "Hair Care",
+          "Health & Support",
+          "Skin Care"
+        ]
+      },
+      "Deodorants & Antiperspirants": {
+        "category": [
+          "Personal Care"
+        ]
+      },
+      "Eye & Lash Care": {
+        "category": [
+          "Hair Care",
+          "Skin Care"
+        ]
+      },
+      "Face Care": {
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "Hair & Scalp Care": {
+        "category": [
+          "Hair Care"
+        ]
+      },
+      "Intimate Care": {
+        "category": [
+          "Personal Care"
+        ]
+      },
+      "Joint & Muscle Care": {
+        "category": [
+          "Health & Support"
+        ]
+      },
+      "Lip Care": {
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "Skin Repair & Healing": {
+        "category": [
+          "Health & Support",
+          "Skin Care"
+        ]
+      },
+      "Sun Care": {
+        "category": [
+          "Skin Care"
+        ]
+      },
+      "Supplements": {
+        "category": [
+          "Health & Support"
+        ]
+      }
+    }
+  },
+  "product_line_to_brand": {
+    "Sebio-Control": "Vacation",
+    "Aqua-Repair": "Vacation",
+    "Uni-White": "Vacation",
+    "Wrinkless": "Vacation",
+    "Advance Repair": "Capixy",
+    "Intense": "Capixy"
+  },
+  "brand_aliases": {
+    "Capixy": [
+      "capixy",
+      "capixi",
+      "capixe",
+      "kapixy",
+      "capexy"
+    ],
+    "Femi9": [
+      "femi9",
+      "femi 9",
+      "femi nine",
+      "femmi9"
+    ],
+    "InShape": [
+      "inshape",
+      "in shape",
+      "in-shape"
+    ],
+    "Methytral": [
+      "methytral",
+      "methitral",
+      "metytral",
+      "methytrel"
+    ],
+    "Movelex": [
+      "movelex",
+      "moveflex",
+      "movlex",
+      "moovelex"
+    ],
+    "Pirlome": [
+      "pirlome",
+      "pirlom",
+      "perlome"
+    ],
+    "Pregnastep": [
+      "pregnastep",
+      "pregna step",
+      "pregnastip"
+    ],
+    "Soralone": [
+      "soralone",
+      "soralon",
+      "soralen",
+      "sorolone"
+    ],
+    "Vacation": [
+      "vacation",
+      "vacasion",
+      "vacashion",
+      "vication",
+      "vaction"
+    ]
+  },
+  "hero_to_ingredients": {
+    "Argireline": [],
+    "Caffeine + EGCG": [
+      "Caffeine",
+      "EGCG"
+    ],
+    "Cica (Centella Asiatica)": [
+      "Centella Asiatica (Cica)"
+    ],
+    "Copper Peptide": [
+      "Copper Tripeptide-1"
+    ],
+    "Glycolic Acid": [
+      "Glycolic Acid"
+    ],
+    "Hyaluronic Acid": [
+      "Hyaluronic Acid"
+    ],
+    "Niacinamide + Zinc PCA": [
+      "Niacinamide (Vitamin B3)",
+      "Zinc PCA"
+    ],
+    "R2CP Complex (Redensyl®, Capixyl®, Procapil®, Resveratrol)": [
+      "Redensyl",
+      "Capixyl",
+      "Procapil",
+      "Resveratrol"
+    ],
+    "Retinol": [
+      "Retinol"
+    ],
+    "Urea": [
+      "Urea"
+    ],
+    "Vitamin C": [
+      "Vitamin C"
+    ]
+  },
+  "field_map": {
+    "name_en": "name",
+    "name_ar": "name_ar",
+    "brand": "brand",
+    "category": "category",
+    "product_group": "product_group",
+    "product_type": "product_type",
+    "product_form": "product_form",
+    "concerns": "concerns",
+    "suitable_for": "suitable_for",
+    "hero_ingredient": "hero_ingredient.name",
+    "ingredients": "ingredients_canonical"
+  },
+  "arabic_hints": {
+    "brand": {
+      "Capixy": [
+        "كابيكسي"
+      ],
+      "Femi9": [
+        "فيمي"
+      ],
+      "InShape": [
+        "إن",
+        "باقة"
+      ],
+      "Methytral": [
+        "ميثيترال"
+      ],
+      "Movelex": [
+        "موڤلكس",
+        "موڈلكس",
+        "موفلكس",
+        "موڄلكس"
+      ],
+      "Pirlome": [
+        "بيرلوم"
+      ],
+      "Pregnastep": [
+        "بريجناستيب"
+      ],
+      "Soralone": [
+        "سورالون"
+      ],
+      "Vacation": [
+        "ڤاكيشن",
+        "ڈاكيشن"
+      ]
+    },
+    "product_name": {
+      "Capixy Lashes Treatment Serum 10ml": "كابيكسي سيروم علاج الرموش 10 مل",
+      "Capixy Advance Repair Conditioner 250ml": "كابيكسي أدڤانس ريبير بلسم 250 مل",
+      "Capixy Anti-Dandruff Hair conditioner 250ml": "كابيكسي بلسم ضد القشرة 250 مل",
+      "Capixy Hair Hydrating Conditioner 250ml": "كابيكسي بلسم مرطب للشعر 250 مل",
+      "Capixy Cream 120ml": "كابيكسي كريم 120 مل",
+      "Capixy Advance Repair Leave in Hair Mask 250ml": "كابيكسي أدڤانس ريبير ماسك للشعر بدون شطف 250 مل",
+      "Capixy Hair Mask 250ml": "كابيكسي ماسك للشعر 250 مل",
+      "Capixy Anti- Dandruff Serum Spray 120ml": "كابيكسي سبراي سيروم ضد القشرة 120 مل",
+      "Capixy Hair Serum 120ml": "كابيكسي سيروم للشعر 120 مل",
+      "Capixy Intense Tonic Spray 125ml": "كابيكسي إنتنس تونيك سبراي 125 مل",
+      "Capixy Tonic Spray 250ml": "كابيكسي تونيك سبراي 250 مل",
+      "Capixy Anti Hair Loss Vials 70ml": "كابيكسي أمبولات ضد تساقط الشعر 70 مل",
+      "Capixy Leave-in Heat protection spray 200 ml": "كابيكسي سبراي حماية من الحرارة بدون شطف 200 مل",
+      "Capixy Intense Dry Foam 120 ml": "كابيكسي إنتنس دراي فوم 120 مل",
+      "Capixy Advance Repair Shampoo 250ml": "كابيكسي أدڤانس ريبير شامبو 250 مل",
+      "Capixy Anti-Dandruff Hair Shampoo 250ml": "كابيكسي شامبو ضد القشرة 250 مل",
+      "Capixy Shampoo 250ml": "كابيكسي شامبو 250 مل",
+      "Soralone Anti-Dandruff Shampoo 250ml": "سورالون شامبو ضد القشرة 250 مل",
+      "Movelex Active Foam 200ml": "موڈلكس أكتيڈ فوم 200 مل",
+      "Movelex Cream 120gm": "موڤلكس كريم 120 جم",
+      "Movelex Cream 50gm": "موڈلكس كريم 50 جم",
+      "Movelex Gel 100gm": "موڈلكس جل 100 جم",
+      "Movelex Nano Spray 200ml": "موفلكس نانو سبراي 200 مل",
+      "Movelex Roll On Massage 80 ml": "موڤلكس رول أون للتدليك 80 مل",
+      "Methytral Nipple Cream": "ميثيترال كريم للحلمات",
+      "Methytral Esthetic Cream 50gm": "ميثيترال إستيتيك كريم 50 جم",
+      "Methytral Hyalu Gel 50gm": "ميثيترال هيالو جل 50 جم",
+      "Methytral Anti-Stretch Marks Repairing Cream Gel 50gm": "ميثيترال كريم جل لإصلاح علامات التمدد 50 جم",
+      "Methytral Nano Spray 100ml": "ميثيترال نانو سبراي 100 مل",
+      "Methytral Soft Gel 50gm": "ميثيترال سوفت جل 50 جم",
+      "Pirlome For Skin, Hair & Nails": "بيرلوم للبشرة والشعر والأظافر",
+      "Movelex Advance": "موڄلكس أدڄانس",
+      "Movelex Ultra": "موڤلكس ألترا",
+      "Pregnastep 1 Dietary Supplement": "بريجناستيب 1 مكمل غذائي",
+      "Vacation Antiperspirant - Fragrance Free 200 ml": "ڤاكيشن مضاد للتعرق – بدون عطر 200 مل",
+      "Soralone Cica Roll on 50 ml": "سورالون سيكا رول أون 50 مل",
+      "Vacation Arabian Oud Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح برائحة العود العربي 50 مل",
+      "Vacation Deodorant Spray - Icy Sage 200 ml": "ڤاكيشن سبراي مزيل عرق – آيسي سيج 200 مل",
+      "Vacation Deodorant Spray - Lychee Pink Pepper 200 ml": "ڤاكيشن سبراي مزيل عرق – ليتشي بينك بيبر 200 مل",
+      "Vacation Deodorant Spray - Raspberry marshmallow 200 ml": "ڤاكيشن سبراي مزيل عرق – راسبيري مارشميلو 200 مل",
+      "Vacation Deodorant Spray - Sweet Saffron 200 ml": "ڤاكيشن سبراي مزيل عرق – سويت سافرون 200 مل",
+      "Vacation Deodorant Spray - Vanilla Caramel 200 ml": "ڤاكيشن سبراي مزيل عرق – ڤانيلا كراميل 200 مل",
+      "Vacation French Lust Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح فرينش لاست 50 مل",
+      "Vacation Honey & Milk Whitening Deodorant 50 ml": "ڈاكيشن مزيل عرق للتفتيح هاني آند ميلك 50 مل",
+      "Vacation Original Unscented Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح أوريجينال بدون رائحة 50 مل",
+      "Vacation Pearl & Rose Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح باللؤلؤ والورد 50 مل",
+      "Vacation Piña Colada Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح بينا كولادا 50 مل",
+      "Vacation Roll on Beach Breeze 50 ml": "ڤاكيشن رول أون بيتش بريز 50 مل",
+      "Vacation Roll on power Freeze 50 ml": "ڤاكيشن رول أون باور فريز 50 مل",
+      "Vacation Triple Diffusion Whitening Deodorant 50 ml": "ڤاكيشن مزيل عرق للتفتيح تريبل ديفيوجن 50 مل",
+      "Vacation Watermelon deodorant spray 200ml": "ڤاكيشن واترميلون سبراي مزيل عرق 200 مل",
+      "Vacation Watermelon hydra bomb Roll on 50 ml": "ڤاكيشن واترميلون هيدرا بومب رول أون 50 مل",
+      "Femi9 Intimate Liquid Cleanser 250ml": "فيمي 9 غسول للمنطقة الحساسة 250 مل",
+      "Vacation Aqua-Repair Body Milk 300ml": "ڈاكيشن أكوا ريبير مرطب سريع الامتصاص 300 مل",
+      "Vacation Watermelon Body Scrub 150ml": "ڈاكيشن واترميلون مقشر للجسم 150 مل",
+      "Soralone Urea 5% Hand Cream 60ml": "سورالون يوريا 5% كريم لليدين 60 مل",
+      "Vacation Watermelon Hand Cream 60ml": "ڤاكيشن واترميلون كريم لليدين 60 مل",
+      "Vacation Wrinkless Eye Cream 15ml": "ڈاكيشن رينكلس كريم العين 15 مل",
+      "Vacation Caffeine Serum 5% 30ml": "ڤاكيشن سيروم كافيين 5% – 30 مل",
+      "Vacation Sebio-Control Acne Cream 60ml": "ڈاكيشن سيبيو كونترول كريم لحب الشباب 60 مل",
+      "vacation wrinkless anti aging jelly cream 60 gm": "ڤاكيشن رينكلس جيلي كريم مضاد لعلامات التقدم في السن 60 جم",
+      "Vacation Aqua-Repair Micellar Water 200ml": "ڤاكيشن أكوا ريبير ماء ميسيلار 200 مل",
+      "Vacation Aqua-Repair Milky Cleanser 200ml": "ڤاكيشن أكوا ريبير غسول كريمي 200 مل",
+      "Vacation Sebio-Control Cleansing gel 200ml": "ڈاكيشن سيبيو كونترول جل منظف 200 مل",
+      "Vacation Uni-White Cleansing Foam 200ml": "ڈاكيشن يوني وايت رغوة منظفة 200 مل",
+      "Vacation Argireline Serum 10% 30ml": "ڤاكيشن سيروم أرجيريلين 10% – 30 مل",
+      "Vacation Copper Peptide Serum 10% 30ml": "ڤاكيشن سيروم كوبر ببتيد 10% – 30 مل",
+      "Vacation Hyaluronic Acid Serum 3% 30 ml": "ڤاكيشن سيروم هيالورونيك أسيد 3% – 30 مل",
+      "Vacation Niacinamide Serum 30 ml ( 10% + Zinc PCA )": "ڤاكيشن سيروم نياسيناميد 30 مل (10% + زنك PCA)",
+      "Vacation Retinol Serum 1% 30 ml": "ڈاكيشن سيروم ريتينول 1% – 30 مل",
+      "Vacation Sebio-Control Glycolic Acid Serum 30ml": "ڈاكيشن سيبيو كونترول سيروم حمض الجليكوليك 30 مل",
+      "Vacation Vitamin C Serum 10% 30 ml": "ڈاكيشن سيروم ڈيتامين سي 10% – 30 مل",
+      "Soralone Acne Prone Skin Moisturizer Cream Gel 60 ml": "سورالون كريم جل مرطب للبشرة المعرّضة لحب الشباب 60 مل",
+      "Soralone Hydra Cream Gel 100ml": "سورالون هيدرا كريم جل 100 مل",
+      "Soralone Urea 15% Cream Gel 60ml": "سورالون يوريا 15% كريم جل 60 مل",
+      "Vacation Sebio-Control Moisturizer Cream Gel 60ml": "ڤاكيشن سيبيو كونترول كريم جل مرطب 60 مل",
+      "Vacation Sebio-control Toner 200ml": "ڤاكيشن سيبيو كونترول تونر 200 مل",
+      "Vacation Uni-White Day Gel 60ml": "ڈاكيشن يوني وايت جل نهاري 60 مل",
+      "Vacation Uni-White Night Cream 60ml": "ڤاكيشن يوني وايت كريم ليلي 60 مل",
+      "Soralone CICA Lip Balm 5ml": "سورالون سيكا مرطب شفاه 5 مل",
+      "Vacation Aqua-Repair Lip Balm - Dragonfruit - SPF 30+": "ڈاكيشن أكوا ريبير مرطب شفاه – فاكهة التنين – SPF 30+",
+      "Vacation Aqua-Repair Lip Balm - Honey & Cocoa Butter - SPF 30+": "ڈاكيشن أكوا ريبير مرطب شفاه – عسل وزبدة كاكاو – SPF 30+",
+      "Vacation Aqua-Repair Lip Balm - Pina Colada - SPF 30+": "ڈاكيشن أكوا ريبير مرطب شفاه – بينا كولادا – SPF 30+",
+      "Vacation Aqua-Repair Lip Balm - Strawberry Bubblegum - SPF 30+": "ڈاكيشن أكوا ريبير مرطب شفاه – فراولة ببل جم – SPF 30+",
+      "Soralone Cica Cream Gel 60ml": "سورالون سيكا كريم جل 60 مل",
+      "Vacation Aqua-Repair Cica Cream Gel 60ml": "ڤاكيشن أكوا ريبير سيكا كريم جل 60 مل",
+      "Soralone Nano Cica Spray 100ml": "سورالون نانو سيكا سبراي 100 مل",
+      "Vacation Sunscreen Cream 60ml": "ڈاكيشن كريم واقي الشمس 60 مل",
+      "Vacation Sunscreen Cream Gel 60 ml": "ڤاكيشن كريم جل واقي الشمس 60 مل",
+      "Vacation Sunscreen Lotion 120ml": "ڈاكيشن لوشن واقي الشمس 120 مل",
+      "Vacation Sunscreen Spray 200ml": "ڈاكيشن سبراي واقي الشمس 200 مل",
+      "Vacation Tinted sunscreen 50 ML": "ڤاكيشن واقي شمس ملوّن 50 مل",
+      "Vacation Unseen Sunscreen Gel 30ml": "ڤاكيشن أنسين جل واقي الشمس 30 مل",
+      "3 Capixy Anti Hair Loss Vials 70ml": "3 × كابيكسي أمبولات ضد تساقط الشعر 70 مل",
+      "3 Capixy Intense Tonic Spray 125ml": "3 × كابيكسي إنتنس تونيك سبراي 125 مل",
+      "3 Capixy Lashes Treatment Serum 10ml": "3 × كابيكسي سيروم علاج الرموش 10 مل",
+      "Capixy Anti hairloss vials 70 ml+ Pirlome For Skin, Hair & Nails": "كابيكسي أمبولات ضد تساقط الشعر 70 مل + بيرلوم للبشرة والشعر والأظافر",
+      "Capixy Intense Tonic Spray 125ml + Pirlome For Skin, Hair & Nails": "كابيكسي إنتنس تونيك سبراي 125 مل + بيرلوم للبشرة والشعر والأظافر",
+      "Capixy Intense Tonic Spray 125ml+1000 Laser Pulses Card": "كابيكسي إنتنس تونيك سبراي 125 مل + كارت 1000 نبضة ليزر",
+      "Capixy Lashes Treatment Serum 10ml + 1000 Laser Pulses Card": "كابيكسي سيروم علاج الرموش 10 مل + كارت 1000 نبضة ليزر",
+      "Inshape & Capixy Bundle": "باقة إن شيب وكابيكسي",
+      "3 Pirlome For Skin, Hair & Nails": "3 × بيرلوم للبشرة والشعر والأظافر",
+      "Movelex Nano Spray 200ml & Movelex Roll On Massage 80 ml": "موڤلكس نانو سبراي 200 مل + موڤلكس رول أون للتدليك 80 مل",
+      "Movelex Nano Spray 200ml + Movelex Gel 100gm": "موڤلكس نانو سبراي 200 مل + موڤلكس جل 100 جم",
+      "3 Femi9 Intimate Liquid Cleanser 250ml": "3 × فيمي 9 غسول للمنطقة الحساسة 250 مل",
+      "In-shape laser kit": "إن شيب – عدة الليزر",
+      "InShape Recovery Essentials": "إن شيب – أساسيات التعافي"
+    }
+  }
+}
