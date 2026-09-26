@@ -3,6 +3,7 @@ name typo test.
 
     python -m scripts.eval_retrieval                  # real embedding model (RETRIEVAL_EMBEDDING_ROUTE)
     python -m scripts.eval_retrieval --no-semantic    # filters + names + boosts only (semantic "failed")
+    python -m scripts.eval_retrieval --relax          # the plan's filter relaxation instead of strict matching
     python -m scripts.eval_retrieval --ids r02,r03 --show
 
 Each row has an extractor output (`filters`, null when the rewriter failed),
@@ -108,7 +109,8 @@ def report(rows: list, results: dict, args) -> dict:
 
     n = len(rows)
     forbidden_rows = sum(1 for s in scores if s["forbidden"])
-    print(f"\n=== retrieval eval, {n} rows (semantic {'on: ' + settings.RETRIEVAL_EMBEDDING_ROUTE if args.semantic else 'off'}) ===")
+    print(f"\n=== retrieval eval, {n} rows (semantic {'on: ' + settings.RETRIEVAL_EMBEDDING_ROUTE if args.semantic else 'off'}; "
+          f"filters {'relaxed when empty' if args.relax else 'strict'}) ===")
     print(f"precision@k {avg('precision', scores):.3f}   recall@k {avg('recall', scores):.3f}   MRR {avg('mrr', scores):.3f}   "
           f"rows returning a forbidden product: {forbidden_rows}")
     print("by tag: " + ", ".join(f"{t} R {avg('recall', v):.2f}/MRR {avg('mrr', v):.2f} ({len(v)})"
@@ -145,6 +147,7 @@ def typo_report(seed: int) -> None:
 
 async def run(args) -> int:
     rows = load_rows(Path(args.eval_file) if args.eval_file else EVAL_PATH)
+    settings.RETRIEVAL_RELAX_FILTERS = args.relax
     if args.ids:
         wanted = set(args.ids.split(","))
         rows = [r for r in rows if r["id"] in wanted]
@@ -156,7 +159,7 @@ async def run(args) -> int:
         results[row["id"]] = await run_row(row, args.semantic)
     summary = report(rows, results, args)
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    out = RESULTS_DIR / f"eval_retrieval{'' if args.semantic else '_no_semantic'}.jsonl"
+    out = RESULTS_DIR / f"eval_retrieval{'' if args.semantic else '_no_semantic'}{'_relax' if args.relax else ''}.jsonl"
     out.write_text("".join(json.dumps(results[r["id"]], ensure_ascii=False) + "\n" for r in rows), encoding="utf-8")
     print(f"per-row results: {out.relative_to(ROOT)}")
     if not args.skip_typos:
@@ -169,6 +172,8 @@ def main(argv=None) -> int:
     ap.add_argument("--eval-file", default="")
     ap.add_argument("--ids", default="")
     ap.add_argument("--no-semantic", dest="semantic", action="store_false")
+    ap.add_argument("--relax", action="store_true", default=settings.RETRIEVAL_RELAX_FILTERS,
+                    help="relax filters in the plan's order when nothing matches every key")
     ap.add_argument("--show", action="store_true", help="print every row, not only the imperfect ones")
     ap.add_argument("--skip-typos", action="store_true")
     ap.add_argument("--seed", type=int, default=13)

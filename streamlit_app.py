@@ -1,19 +1,26 @@
-"""Jamila on Streamlit: the same widget as web/, mounted as a custom
-component, with the chat pipeline running in this process.
+"""Jamila on Streamlit, with the chat pipeline running in this process.
 
     streamlit run streamlit_app.py
 
-The widget sends each request (a chat message, an answer card's details, a
-reset) as the component value. This script handles it and passes the result
-back in the component's args, as the same events the /chat SSE stream sends
-(api/widget.py), so web/app.js renders both transports with one code path.
+Two modes, picked in the sidebar:
+
+- Query console (the default): type any query and read the reply, plus what
+  the pipeline did. The matched products show as the widget's product cards
+  (the same component, in its 'cards' view); "Show matched products" off
+  leaves just their count.
+- Widget preview: the storefront widget from web/, with product cards, as a
+  custom component. The widget sends each request (a chat message, an answer
+  card's details, a reset) as the component value; this script handles it and
+  passes the result back in the component's args, as the same events the
+  /chat SSE stream sends (api/widget.py).
 
 Deploys to Streamlit Community Cloud as it is: main file streamlit_app.py,
-Python 3.12, and GROQ_API (plus any other setting from .env.example) in the
+Python 3.12, and ZAI_API_KEY (plus any other setting from .env.example) in the
 app's secrets.
 """
 
 import asyncio
+import html
 import logging
 import os
 import threading
@@ -39,7 +46,7 @@ _export_secrets()
 import streamlit.components.v1 as components  # noqa: E402
 
 from agents.orchestrator.orchestrator import handle_message, warm_up  # noqa: E402
-from api.widget import error_events, product_details, turn_events  # noqa: E402
+from api.widget import cards, error_events, product_details, turn_events  # noqa: E402
 from config import settings  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -49,6 +56,8 @@ WEB_DIR = Path(__file__).resolve().parent / "web"
 FRAME_HEIGHT = int(os.getenv("JAMILA_FRAME_HEIGHT", "720"))
 TURN_TIMEOUT_S = 120
 MAX_DETAILS = 6          # answer-card payloads kept in the component args
+CONSOLE, WIDGET = "Query console", "Widget preview"
+QUERY_EXAMPLE = "Type any query, for example: عايزة سيروم للشعر من غير سيليكون"
 AUDIENCES = {
     "auto": "Detected from the chat",
     "customer": "Customer",
@@ -98,10 +107,114 @@ def init_state() -> None:
         "jamila_handled": set(),     # request ids already handled
         "jamila_generation": 0,      # bumped to remount the component
         "jamila_last_turn": None,    # the last TurnResult, for the sidebar
+        "console_session": str(uuid.uuid4()),
+        "console_turns": [],         # [{query, turn}] or [{query, error}]
     }
     for key, value in defaults.items():
         st.session_state.setdefault(key, value)
 
+
+# ---------------------------------------------------------------- query console
+
+def show_text(text: str) -> None:
+    """Message text, laid out right to left when it is Arabic. text-align:
+    start, because Streamlit sets left explicitly."""
+    body = html.escape(text or "").replace("\n", "<br>")
+    st.markdown(f'<div dir="auto" style="text-align: start">{body}</div>', unsafe_allow_html=True)
+
+
+def console_turn(query: str) -> dict:
+    try:
+        turn = run_turn(query, st.session_state.console_session)
+        return {"query": query, "turn": turn.model_dump(mode="json")}
+    except Exception as e:  # noqa: BLE001 -- shown in the console instead
+        logger.exception("Console turn failed")
+        return {"query": query, "error": f"{type(e).__name__}: {e}"}
+
+
+def show_cards(t: dict, key: str) -> None:
+    """The turn's products as the widget's cards (the component's 'cards'
+    view), with each card's answer-card details sent along."""
+    retrieval = t.get("retrieval") or {}
+    items = cards(t["products"], retrieval.get("applied_filters") or {})
+    jamila(
+        view="cards",
+        products=items,
+        details={c["handle"]: product_details(c["handle"]) for c in items},
+        locale="ar" if t["prequal"]["language"] in ("ar", "mixed") else "en",
+        key=key,
+        default=None,
+    )
+
+
+def show_details(t: dict) -> None:
+    pq = t["prequal"]
+    retrieval = t.get("retrieval")
+    status = (pq.get("meta") or {}).get("status") or {}
+    route = [pq["route"], "retrieval" if pq["needs_retrieval"] else "no retrieval"]
+    if pq.get("is_follow_up"):
+        route.append("follow-up")
+    lines = [
+        f"**Rewritten request:** {html.escape(pq['query_en'])}",
+        f"**Route:** {' · '.join(route)}",
+        "**Model status:** " + (" · ".join(f"{k} {v}" for k, v in status.items()) or "n/a"),
+    ]
+    if retrieval:
+        lines.append(f"**Candidates:** {retrieval.get('total_candidates')}")
+        if retrieval.get("relaxed_keys"):
+            lines.append(f"**Relaxed filters:** {', '.join(retrieval['relaxed_keys'])}")
+    st.markdown("  \n".join(lines))
+    if retrieval:
+        st.markdown("**Applied filters**")
+        st.json({k: v for k, v in (retrieval.get("applied_filters") or {}).items() if v}, expanded=True)
+    else:
+        st.markdown("Retrieval did not run for this query.")
+    st.markdown("**Timings (ms)**")
+    st.json(t.get("timings_ms") or {}, expanded=False)
+
+
+def show_console_turn(entry: dict, index: int, products_on: bool, details_on: bool) -> None:
+    with st.chat_message("user"):
+        show_text(entry["query"])
+    with st.chat_message("assistant"):
+        if "error" in entry:
+            st.error(f"The pipeline failed: {entry['error']}")
+            return
+        t = entry["turn"]
+        pq = t["prequal"]
+        show_text(t["reply"])
+        seconds = (t.get("timings_ms") or {}).get("total", 0) / 1000
+        st.caption(" · ".join([t["path"], pq["intent"], pq["persona"], pq["language"], f"{seconds:.2f} s"]))
+        products = t.get("products") or []
+        if products:
+            count = "1 product matched" if len(products) == 1 else f"{len(products)} products matched"
+            if products_on:
+                show_cards(t, key=f"cards-{st.session_state.console_session}-{index}")   # carries its own count
+            else:
+                st.caption(f"{count}. Turn on 'Show matched products' in the sidebar to see them.")
+        if details_on:
+            with st.expander("Pipeline details"):
+                show_details(t)
+
+
+def render_console(products_on: bool, details_on: bool) -> None:
+    st.subheader("Jamila console")
+    st.caption("Any query, in Arabic, Arabizi or English, through the full pipeline: "
+               "pre-qualification, filter extraction, retrieval and the reply. "
+               "Follow-ups use the conversation so far, until you start a new session.")
+    for index, entry in enumerate(st.session_state.console_turns):
+        show_console_turn(entry, index, products_on, details_on)
+    query = (st.chat_input(QUERY_EXAMPLE) or "").strip()
+    if query:
+        with st.chat_message("user"):
+            show_text(query)
+        with st.chat_message("assistant"), st.spinner("Running the pipeline"):
+            # Stored before the next Streamlit call, so a rerun cannot drop it.
+            st.session_state.console_turns = st.session_state.console_turns + [console_turn(query)]
+        st.rerun()
+
+
+# ---------------------------------------------------------------- widget preview
 
 def new_conversation(session_id: str = "") -> None:
     st.session_state.jamila_session = session_id or str(uuid.uuid4())
@@ -137,47 +250,72 @@ def handle(request: dict) -> None:
         state.jamila_reset = rid
 
 
-init_state()
-
-with st.sidebar:
-    st.subheader("Jamila")
+def widget_sidebar() -> str:
     audience = st.selectbox("Audience", list(AUDIENCES), format_func=AUDIENCES.get,
                             help="Sets the greeting, the suggested questions and the card density. "
                                  "'Detected from the chat' follows the persona the router detects.")
     if st.button("New conversation", width="stretch"):
         new_conversation()
         st.session_state.jamila_generation += 1
-    if not settings.GROQ_API:
-        st.warning("GROQ_API is not set. Add it to the app's secrets (or to .env locally); "
-                   "until then replies fall back to defaults.")
     last = st.session_state.jamila_last_turn
     if last:
         with st.expander("Last turn in the pipeline"):
             pq = last["prequal"]
             st.markdown(f"**Path** `{last['path']}` · **intent** `{pq['intent']}` · "
                         f"**persona** `{pq['persona']}` · **language** `{pq['language']}`")
-            st.markdown(f"**Rewritten request** {pq['query_en']}")
+            st.markdown(f"**Rewritten request** {html.escape(pq['query_en'])}")
             if last.get("retrieval"):
                 st.markdown("**Applied filters**")
                 st.json(last["retrieval"].get("applied_filters") or {}, expanded=False)
             st.markdown("**Timings (ms)**")
             st.json(last.get("timings_ms") or {}, expanded=False)
+    return audience
+
+
+def render_widget(audience: str) -> None:
+    value = jamila(
+        turns=st.session_state.jamila_turns,
+        details=st.session_state.jamila_details,
+        reset=st.session_state.jamila_reset,
+        session_id=st.session_state.jamila_session,
+        audience=audience,
+        height=FRAME_HEIGHT,
+        key=f"jamila-{st.session_state.jamila_generation}",
+        default=None,
+    )
+    if isinstance(value, dict) and value.get("id") and value["id"] not in st.session_state.jamila_handled:
+        st.session_state.jamila_handled.add(value["id"])
+        handle(value)
+        st.rerun()
+
+
+# ---------------------------------------------------------------- page
+
+init_state()
+
+with st.sidebar:
+    st.subheader("Jamila")
+    mode = st.radio("Mode", [CONSOLE, WIDGET],
+                    help="Query console: any query, with the reply and the pipeline's details. "
+                         "Widget preview: the storefront widget, with product cards.")
+    if mode == CONSOLE:
+        products_on = st.toggle("Show matched products", value=True,
+                                help="Show the products retrieval matched under each reply, as the "
+                                     "widget's product cards. Off: only how many matched.")
+        details_on = st.toggle("Show pipeline details", value=True)
+        if st.button("New session", width="stretch"):
+            st.session_state.console_session = str(uuid.uuid4())
+            st.session_state.console_turns = []
+    else:
+        audience = widget_sidebar()
+    if not settings.ZAI_API_KEY:
+        st.warning("ZAI_API_KEY is not set. Add it to the app's secrets (or to .env locally); "
+                   "until then replies fall back to defaults.")
 
 with st.spinner("Loading the catalogue and models"):
     pipeline_loop()
 
-value = jamila(
-    turns=st.session_state.jamila_turns,
-    details=st.session_state.jamila_details,
-    reset=st.session_state.jamila_reset,
-    session_id=st.session_state.jamila_session,
-    audience=audience,
-    height=FRAME_HEIGHT,
-    key=f"jamila-{st.session_state.jamila_generation}",
-    default=None,
-)
-
-if isinstance(value, dict) and value.get("id") and value["id"] not in st.session_state.jamila_handled:
-    st.session_state.jamila_handled.add(value["id"])
-    handle(value)
-    st.rerun()
+if mode == CONSOLE:
+    render_console(products_on, details_on)
+else:
+    render_widget(audience)

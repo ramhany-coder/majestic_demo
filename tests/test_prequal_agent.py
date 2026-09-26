@@ -7,6 +7,7 @@ import time
 import pytest
 
 import agents.prequal.agent as agent_module
+import agents.prequal.llm_call as llm_call_module
 import llm.fallback as fallback_module
 from agents.prequal.agent import get_cache, prequalify
 from agents.prequal.session_context import SessionContext
@@ -57,6 +58,8 @@ def behaviour(monkeypatch):
     b = {"calls": [], "messages": {}}
     monkeypatch.setattr(fallback_module.client_llm, "get_cached_model",
                         lambda router, model, **kw: FakeModel(model, b))
+    # Two distinct test routes, whatever the configured defaults are.
+    monkeypatch.setattr(llm_call_module, "PREQUAL_FALLBACK_ORDER", [PRIMARY, FALLBACK])
     monkeypatch.setattr(settings, "PREQUAL_REWRITER_TIMEOUT_S", 0.2)
     monkeypatch.setattr(settings, "PREQUAL_ROUTER_TIMEOUT_S", 0.2)
     monkeypatch.setattr(settings, "PREQUAL_FALLBACK_TIMEOUT_S", 0.2)

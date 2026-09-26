@@ -23,7 +23,7 @@ from llm.fallback import AllRoutesFailed
 logger = logging.getLogger("filter_extractor")
 
 # Model-name substrings of reasoning models, which need token headroom to think.
-REASONING_MODEL_HINTS = ("gpt-oss", "deepseek-r1", "o1", "o3", "o4")
+REASONING_MODEL_HINTS = ("gpt-oss", "deepseek-r1", "o1", "o3", "o4", "glm-5")
 
 STATUS_OK = "ok"
 STATUS_FALLBACK = "fallback_model"

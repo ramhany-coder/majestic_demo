@@ -14,7 +14,7 @@ from config import settings
 
 
 class Llm:
-    routers_list = ["anthropic", "gemini", "gpt", "groq", "ollama"]
+    routers_list = ["anthropic", "gemini", "gpt", "groq", "ollama", "zai"]
 
     def __init__(self, temp: float = 0):
         self.temp = temp
@@ -30,6 +30,7 @@ class Llm:
             "groq": Llm.groq,
             "ollama": Llm.ollama,
             "gpt": Llm.gpt,
+            "zai": Llm.zai,
         }
 
         temp = overrides.pop("temperature", self.temp)
@@ -37,7 +38,7 @@ class Llm:
 
     def get_cached_model(self, router: str, model: str, **overrides):
         """Same as get_model, but returns one shared instance per distinct
-        (router, model, overrides). Groq / OpenAI instances created inside an
+        (router, model, overrides). Groq / OpenAI / Z.ai instances created inside an
         event loop also share that loop's single httpx.AsyncClient, so all
         concurrent calls draw from one connection pool."""
         router = Helpers.validate_router(router)
@@ -107,8 +108,19 @@ class Llm:
             **kw,
         )
 
+    # 5. Z.ai GLM, over its OpenAI-compatible endpoint
+    @staticmethod
+    def zai(model: str, temp: float, **kw):
+        return ChatOpenAI(
+            model=model,
+            api_key=settings.ZAI_API_KEY,
+            base_url=settings.ZAI_BASE_URL,
+            temperature=temp,
+            **kw,
+        )
 
-_SHARED_HTTP_ROUTERS = {"groq", "gpt"}
+
+_SHARED_HTTP_ROUTERS = {"groq", "gpt", "zai"}
 _loop_clients: "weakref.WeakKeyDictionary[asyncio.AbstractEventLoop, httpx.AsyncClient]" = weakref.WeakKeyDictionary()
 HTTP_POOL_LIMITS = httpx.Limits(max_connections=64, max_keepalive_connections=32, keepalive_expiry=120)
 

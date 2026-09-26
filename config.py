@@ -23,21 +23,27 @@ class Settings:
     OLLAMA_PATH = os.getenv("OLLAMA_PATH", "http://localhost:11434")
     GPT_API = os.getenv("GPT_API")
     ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+    # Z.ai (GLM) serves every LLM call by default, through its OpenAI-compatible
+    # endpoint (use https://open.bigmodel.cn/api/paas/v4/ for a BigModel key).
+    ZAI_API_KEY = os.getenv("ZAI_API_KEY")
+    ZAI_BASE_URL = os.getenv("ZAI_BASE_URL", "https://api.z.ai/api/paas/v4/")
 
     # --- Metadata filter extractor (agents/filter_extractor) -----------------
     # Routes are "router:model" (router is one of llm.helpers.Helpers.routers_list).
     # The primary is the smallest fast model this project can reach; the
     # fallback is tried once per call when the primary errors or times out.
-    EXTRACTOR_PRIMARY_ROUTE = os.getenv("EXTRACTOR_PRIMARY_ROUTE", "groq:qwen/qwen3.8-27b")
-    EXTRACTOR_FALLBACK_ROUTE = os.getenv("EXTRACTOR_FALLBACK_ROUTE", "groq:openai/gpt-oss-20b")
+    EXTRACTOR_PRIMARY_ROUTE = os.getenv("EXTRACTOR_PRIMARY_ROUTE", "zai:glm-5.3-flash")
+    EXTRACTOR_FALLBACK_ROUTE = os.getenv("EXTRACTOR_FALLBACK_ROUTE", "zai:glm-5.3-flash")
     # Feature flags for the two fallback stages.
     EXTRACTOR_USE_FALLBACK_MODEL = _env_bool("EXTRACTOR_USE_FALLBACK_MODEL", True)
     EXTRACTOR_USE_RULE_FALLBACK = _env_bool("EXTRACTOR_USE_RULE_FALLBACK", True)
     # Per-attempt timeouts (seconds), and a hard per-call deadline over both attempts.
-    EXTRACTOR_TIMEOUT_S = _env_float("EXTRACTOR_TIMEOUT_S", 2.5)
-    EXTRACTOR_FALLBACK_TIMEOUT_S = _env_float("EXTRACTOR_FALLBACK_TIMEOUT_S", 2.5)
-    EXTRACTOR_CALL_DEADLINE_S = _env_float("EXTRACTOR_CALL_DEADLINE_S", 4.5)
-    # Reasoning models (gpt-oss) spend completion tokens thinking before they
+    # Sized for glm-5.3-flash: about 2-3 s per call even for a few output tokens,
+    # with the odd call hanging far longer (the retry covers those).
+    EXTRACTOR_TIMEOUT_S = _env_float("EXTRACTOR_TIMEOUT_S", 4.0)
+    EXTRACTOR_FALLBACK_TIMEOUT_S = _env_float("EXTRACTOR_FALLBACK_TIMEOUT_S", 4.0)
+    EXTRACTOR_CALL_DEADLINE_S = _env_float("EXTRACTOR_CALL_DEADLINE_S", 8.0)
+    # Reasoning models (gpt-oss, glm-5.x -- its thinking cannot be turned off) spend completion tokens thinking before they
     # answer; this many tokens are added to max_tokens when a call is routed to one.
     EXTRACTOR_REASONING_TOKEN_ALLOWANCE = int(os.getenv("EXTRACTOR_REASONING_TOKEN_ALLOWANCE", 300))
     # Optional rewrite-to-English call before the fan-out (Arabic / Arabizi users).
@@ -76,11 +82,11 @@ class Settings:
     PREQUAL_ROUTER_MAX_TOKENS = int(os.getenv("PREQUAL_ROUTER_MAX_TOKENS", 40))
     # Primary-attempt timeouts, the fallback attempt's timeout, and a hard
     # deadline per call over both attempts (seconds).
-    PREQUAL_REWRITER_TIMEOUT_S = _env_float("PREQUAL_REWRITER_TIMEOUT_S", 2.0)
-    PREQUAL_ROUTER_TIMEOUT_S = _env_float("PREQUAL_ROUTER_TIMEOUT_S", 1.5)
-    PREQUAL_FALLBACK_TIMEOUT_S = _env_float("PREQUAL_FALLBACK_TIMEOUT_S", 2.0)
-    PREQUAL_REWRITER_DEADLINE_S = _env_float("PREQUAL_REWRITER_DEADLINE_S", 3.5)
-    PREQUAL_ROUTER_DEADLINE_S = _env_float("PREQUAL_ROUTER_DEADLINE_S", 3.0)
+    PREQUAL_REWRITER_TIMEOUT_S = _env_float("PREQUAL_REWRITER_TIMEOUT_S", 4.0)
+    PREQUAL_ROUTER_TIMEOUT_S = _env_float("PREQUAL_ROUTER_TIMEOUT_S", 4.0)
+    PREQUAL_FALLBACK_TIMEOUT_S = _env_float("PREQUAL_FALLBACK_TIMEOUT_S", 4.0)
+    PREQUAL_REWRITER_DEADLINE_S = _env_float("PREQUAL_REWRITER_DEADLINE_S", 8.0)
+    PREQUAL_ROUTER_DEADLINE_S = _env_float("PREQUAL_ROUTER_DEADLINE_S", 8.0)
     # Chat context sent to both calls.
     PREQUAL_HISTORY_MESSAGES = int(os.getenv("PREQUAL_HISTORY_MESSAGES", 6))
     PREQUAL_HISTORY_USER_CHARS = int(os.getenv("PREQUAL_HISTORY_USER_CHARS", 300))
@@ -109,9 +115,11 @@ class Settings:
     RETRIEVAL_BM25_K1 = _env_float("RETRIEVAL_BM25_K1", 1.2)
     RETRIEVAL_BM25_B = _env_float("RETRIEVAL_BM25_B", 0.3)
     # A name hit needs BM25 >= this share of the top score for that queried name,
-    # and a bigram Dice coefficient >= RETRIEVAL_NAME_DICE_MIN.
+    # and a bigram Dice coefficient >= RETRIEVAL_NAME_DICE_MIN. The plan's 0.35
+    # let long unrelated names through; 0.45 rejects more of them at no typo-recall
+    # cost (ARCHITECTURE_NOTES.md section 10, "Dice threshold sweep").
     RETRIEVAL_NAME_REL_SCORE = _env_float("RETRIEVAL_NAME_REL_SCORE", 0.8)
-    RETRIEVAL_NAME_DICE_MIN = _env_float("RETRIEVAL_NAME_DICE_MIN", 0.35)
+    RETRIEVAL_NAME_DICE_MIN = _env_float("RETRIEVAL_NAME_DICE_MIN", 0.45)
     RETRIEVAL_NAME_MAX_HITS = int(os.getenv("RETRIEVAL_NAME_MAX_HITS", 10))
     # Intents whose result is filled from the filtered candidates after the
     # name hits. Every other intent returns the name hits alone (when there are any).
@@ -121,6 +129,16 @@ class Settings:
     # Drop bundles from the candidates unless the request asks for them
     # (product_type bundle, group Bundles & Offers, a named bundle, or a price/offer intent).
     RETRIEVAL_BUNDLE_RULE = _env_bool("RETRIEVAL_BUNDLE_RULE", True)
+    # A suitable_for filter naming a specific skin type (oily, dry, ...) also
+    # matches products labeled "all skin types". Off: exact labels only (the plan).
+    RETRIEVAL_ALL_SKIN_TYPES_MATCH = _env_bool("RETRIEVAL_ALL_SKIN_TYPES_MATCH", True)
+    # A product_form also matches catalog forms containing it as whole words
+    # ("cream" -> "cream gel", "tinted cream", "jelly cream").
+    RETRIEVAL_FORM_VARIANTS = _env_bool("RETRIEVAL_FORM_VARIANTS", True)
+    # Off (default): only products matching every requested key are returned;
+    # when none do, the list is empty and the responder says so. On: the plan's
+    # relaxation, dropping keys in a fixed order until something matches.
+    RETRIEVAL_RELAX_FILTERS = _env_bool("RETRIEVAL_RELAX_FILTERS", False)
     # Fusion: final = cosine + these boosts. Override any subset with JSON, for
     # example RETRIEVAL_FUSION_WEIGHTS='{"best_seller": 0.05}'.
     RETRIEVAL_FUSION_WEIGHTS = {
@@ -132,6 +150,7 @@ class Settings:
         "unmatched_exclude": -0.10,     # per unmatched exclude term mentioned in the description
         "exclude_free": 0.05,           # ... unless the description says "<term>-free" / "free from <term>"
         "bundle": -0.05,
+        "all_skin_types": -0.03,        # fits a requested skin type only through "all skin types"
         **json.loads(os.getenv("RETRIEVAL_FUSION_WEIGHTS", "{}")),
     }
     # Semantic search: "router:model" (see llm/embeddings.py). The default is a
@@ -164,5 +183,5 @@ class Settings:
 
 settings = Settings()
 
-if not settings.GROQ_API:
-    logger.error("GROQ_API is not set (check your .env or deployment secrets).")
+if not settings.ZAI_API_KEY:
+    logger.error("ZAI_API_KEY is not set (check your .env or deployment secrets).")

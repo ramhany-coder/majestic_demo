@@ -9,7 +9,7 @@ import time
 import pytest
 
 from agents.retrieval.agent import resolve_k, retrieve
-from agents.retrieval.filters import RELAX_ORDER, apply_filters
+from agents.retrieval.filters import RELAX_ORDER, apply_filters, form_restates_type, form_variants
 from agents.retrieval.fusion import mentions, says_free_of
 from agents.retrieval.embedding_registry import embedding_text
 from agents.retrieval.index_builder import build_index, get_index
@@ -62,6 +62,12 @@ def ok_sem(**scores):
     return SemanticScores(dict(scores), status="ok")
 
 
+@pytest.fixture
+def relax(monkeypatch):
+    """The plan's relaxation (RETRIEVAL_RELAX_FILTERS); the default is strict."""
+    monkeypatch.setattr(settings, "RETRIEVAL_RELAX_FILTERS", True)
+
+
 # --- exact filters -------------------------------------------------------------
 
 def test_or_within_a_key(ix):
@@ -91,9 +97,82 @@ def test_no_filters_is_the_whole_pool_without_bundles(ix):
     assert apply_filters(ix, MetadataFilters(), "find_products").fallback is None
 
 
-def test_unknown_value_matches_nothing(ix):
+def test_unknown_value_matches_nothing(ix, relax):
     out = candidates(ix, product_type=["not a type"])
     assert out.relaxed_keys == ["product_type"] and out.fallback == "semantic_only"
+
+
+# --- strict (default): every requested key must match ---------------------------------
+
+def test_strict_by_default_returns_nothing_when_no_product_matches_every_key(ix):
+    assert settings.RETRIEVAL_RELAX_FILTERS is False
+    out = candidates(ix, product_type=["cream"], product_form=["spray"])
+    assert out.candidates == set() and out.relaxed_keys == [] and out.fallback is None
+    assert out.applied == {"product_type": ["cream"], "product_form": ["spray"]}
+    assert out.near_miss_keys == ["product_type", "product_form"]   # each alone would give b or c
+
+
+def test_strict_keeps_every_candidate_that_matches_all_keys(ix):
+    res = retrieve(MetadataFilters(product_type=["serum"], concerns=["acne"]), ok_sem(a=0.2, b=0.9),
+                   intent="find_products", index=ix)
+    assert res.handles == ["b", "a"] and res.relaxed_keys == [] and res.meta["near_miss_keys"] == []
+
+
+def test_strict_empty_result_still_shows_name_hits(ix):
+    f = MetadataFilters(name_en=["Beta Urea Cream"], product_type=["cream"], product_form=["spray"])
+    res = retrieve(f, ok_sem(), intent="find_products", index=ix)
+    assert res.handles == ["c"] and res.total_candidates == 0
+    assert res.products[0].match["conflict"] == "filter_mismatch"
+
+
+def test_near_miss_names_only_the_keys_that_block():
+    idx = get_index()
+    f = MetadataFilters(product_type=["moisturizer"], product_form=["cream"], concerns=["sensitivity"],
+                        suitable_for=["sensitive skin"], product_group=["Face Care"], category=["Skin Care"])
+    res = retrieve(f, ok_sem(), intent="find_products")
+    assert res.products == [] and res.meta["near_miss_keys"] == ["product_type", "suitable_for"]
+
+
+# --- product_form variants -------------------------------------------------------------
+
+def test_form_variants_add_forms_containing_the_word():
+    forms = ["cream", "cream gel", "tinted cream", "leave-in cream", "gel", "spray"]
+    assert form_variants(forms, ["cream"]) == ["cream", "cream gel", "tinted cream", "leave-in cream"]
+    assert form_variants(forms, ["gel"]) == ["gel", "cream gel"]
+    assert form_variants(forms, ["spray"]) == ["spray"]
+
+
+def test_cream_matches_cream_gels_for_dry_skin():
+    f = MetadataFilters(category=["Skin Care"], product_group=["Face Care"], product_form=["cream"],
+                        concerns=["dryness"], suitable_for=["dry skin"])
+    res = retrieve(f, ok_sem(), intent="find_products")
+    assert set(res.handles) == {"soralone-urea-15-cream-gel-60ml", "soralone-hydra-cream-gel-100ml-copy"}
+
+
+def test_form_variants_can_be_turned_off(monkeypatch):
+    monkeypatch.setattr(settings, "RETRIEVAL_FORM_VARIANTS", False)
+    f = MetadataFilters(product_group=["Face Care"], product_form=["cream"], suitable_for=["dry skin"])
+    assert not {"soralone-urea-15-cream-gel-60ml"} & set(retrieve(f, ok_sem(), intent="find_products").handles)
+
+
+@pytest.mark.parametrize("requested,restates", [
+    ({"product_type": ["body lotion"], "product_form": ["lotion"]}, True),
+    ({"product_type": ["anti-aging cream"], "product_form": ["cream"]}, True),
+    ({"product_type": ["sunscreen"], "product_form": ["spray"]}, False),
+    ({"product_type": ["body lotion", "sunscreen"], "product_form": ["lotion", "spray"]}, False),
+    ({"product_form": ["cream"]}, False),
+])
+def test_form_restates_type(requested, restates):
+    assert form_restates_type(requested) is restates
+
+
+def test_form_that_restates_the_type_is_not_applied():
+    # The Body Milk is typed "body lotion" with form "milk".
+    f = MetadataFilters(product_type=["body lotion"], product_form=["lotion"], suitable_for=["dry skin"])
+    res = retrieve(f, ok_sem(), intent="find_products")
+    assert res.handles == ["vacation-body-milk"] and res.meta["implied_keys"] == ["product_form"]
+    assert "product_form" not in res.applied_filters
+    assert res.products[0].match["filters_matched"] == ["product_type", "suitable_for"]
 
 
 # --- relaxation ----------------------------------------------------------------
@@ -103,19 +182,19 @@ def test_relax_order_is_the_plan_order():
                            "hero_ingredient", "ingredients.include", "product_type", "brand")
 
 
-def test_relaxes_one_key_at_a_time_and_stops_at_first_non_empty(ix):
+def test_relaxes_one_key_at_a_time_and_stops_at_first_non_empty(ix, relax):
     out = candidates(ix, product_type=["cream"], product_form=["spray"], suitable_for=["oily skin"],
                      concerns=["acne"])
     assert out.relaxed_keys == ["product_form", "suitable_for", "concerns"] and out.candidates == {"c"}
     assert out.applied == {"product_type": ["cream"]} and out.fallback is None
 
 
-def test_product_type_is_relaxed_before_brand(ix):
+def test_product_type_is_relaxed_before_brand(ix, relax):
     out = candidates(ix, brand=["Alpha"], product_type=["sunscreen"])
     assert out.relaxed_keys == ["product_type"] and out.candidates == {"a", "b"}
 
 
-def test_exclude_is_never_relaxed(ix):
+def test_exclude_is_never_relaxed(ix, relax):
     out = candidates(ix, hero_ingredient=["Urea"], ingredients=IngredientFilter(exclude=["Urea"]))
     assert out.relaxed_keys == ["hero_ingredient"] and out.fallback == "semantic_only"
     assert "c" not in out.candidates and out.candidates == {"a", "b", "d"}
@@ -146,6 +225,40 @@ def test_named_bundle_allows_bundles_and_they_rank_lower(ix):
     assert res.name_hits[0] == "x" and res.meta["bundles_allowed"]
     res = retrieve(MetadataFilters(product_type=["serum"]), ok_sem(a=0.5, b=0.5, x=0.5), intent="price_offer", index=ix)
     assert res.handles[-1] == "x" and "bundle" in res.products[-1].match["boosts"]
+
+
+# --- "all skin types" ----------------------------------------------------------------
+
+@pytest.fixture(scope="module")
+def ix_all():
+    extra = prod("e", "Alpha Gentle Serum", suitable_for=["all skin types"], price=70, description="For every skin.")
+    return build_index({"products": PRODUCTS + [extra]}, digest="test-all-skin")
+
+
+def test_all_skin_types_matches_a_specific_skin_type(ix_all):
+    out = candidates(ix_all, product_type=["serum"], suitable_for=["oily skin"])
+    assert out.candidates == {"a", "e"} and out.relaxed_keys == []
+
+
+def test_exact_skin_type_label_ranks_first(ix_all):
+    res = retrieve(MetadataFilters(product_type=["serum"], suitable_for=["oily skin"]), ok_sem(a=0.5, e=0.52),
+                   intent="find_products", index=ix_all)
+    assert res.handles == ["a", "e"] and "all_skin_types" in res.products[1].match["boosts"]
+    assert res.products[1].match["filters_matched"] == ["product_type", "suitable_for"]
+
+
+def test_asking_for_all_skin_types_stays_exact(ix_all):
+    out = candidates(ix_all, suitable_for=["all skin types"])
+    assert out.candidates == {"e"}
+    res = retrieve(MetadataFilters(suitable_for=["all skin types"]), ok_sem(), intent="find_products", index=ix_all)
+    assert "all_skin_types" not in res.products[0].match["boosts"]
+
+
+def test_all_skin_types_match_can_be_turned_off(ix_all, monkeypatch):
+    monkeypatch.setattr(settings, "RETRIEVAL_ALL_SKIN_TYPES_MATCH", False)
+    assert candidates(ix_all, product_type=["serum"], suitable_for=["oily skin"]).candidates == {"a"}
+    out = candidates(ix_all, product_type=["serum"], suitable_for=["sensitive skin"])
+    assert out.candidates == set() and out.near_miss_keys == ["suitable_for"]
 
 
 # --- name hits ---------------------------------------------------------------------
@@ -232,13 +345,13 @@ def test_semantic_failure_sets_no_semantic_and_still_ranks(ix):
     assert retrieve(MetadataFilters(), None, index=ix).fallback == "no_semantic"     # search didn't run
 
 
-def test_both_fallbacks_are_recorded(ix):
+def test_both_fallbacks_are_recorded(ix, relax):
     f = MetadataFilters(hero_ingredient=["Urea"], ingredients=IngredientFilter(exclude=["Urea"]))
     res = retrieve(f, SemanticScores(status="timeout"), index=ix)
     assert res.fallback == "no_semantic" and res.meta["fallbacks"] == ["no_semantic", "semantic_only"]
 
 
-def test_output_contract(ix):
+def test_output_contract(ix, relax):
     f = MetadataFilters(product_type=["cream"], product_form=["spray"])
     res = retrieve(f, ok_sem(c=0.4), intent="find_products", k=5, index=ix)
     assert isinstance(res, RetrievalResult) and res.k == 5 and res.total_candidates == 1
@@ -275,7 +388,15 @@ def test_real_hair_serum_without_silicone():
     assert res.relaxed_keys == [] and res.total_candidates == 2
 
 
-def test_real_sunscreen_spray_for_oily_skin_relaxes_the_form():
+def test_real_sunscreen_spray_for_oily_skin_is_the_all_skin_types_spray():
+    f = MetadataFilters(product_type=["sunscreen"], product_form=["spray"], suitable_for=["oily skin"])
+    res = retrieve(f, ok_sem(), intent="find_products")
+    assert res.relaxed_keys == [] and res.handles == ["vacation-sunscreen-lotion-spray-200ml"]
+
+
+def test_real_sunscreen_spray_for_oily_skin_relaxes_the_form_with_exact_labels(monkeypatch, relax):
+    # The plan's behavior: no spray is labeled oily skin, so product_form is relaxed.
+    monkeypatch.setattr(settings, "RETRIEVAL_ALL_SKIN_TYPES_MATCH", False)
     f = MetadataFilters(product_type=["sunscreen"], product_form=["spray"], suitable_for=["oily skin"])
     res = retrieve(f, ok_sem(), intent="find_products")
     assert res.relaxed_keys == ["product_form"] and res.products

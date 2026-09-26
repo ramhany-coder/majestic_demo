@@ -101,9 +101,22 @@ def turn_events(turn: TurnResult) -> List[dict]:
             "total": retrieval.get("total_candidates", len(turn.products)),
             "relaxed": retrieval.get("relaxed_keys", []),
         }})
+    retrieval = turn.retrieval
     events.append({"event": "done", "data": {
         "persona": pq.persona, "intent": pq.intent, "route": pq.route, "path": turn.path,
         "timings_ms": turn.timings_ms,
+        # What the pipeline did, for the query console's details.
+        "pipeline": {
+            "query_en": pq.query_en,
+            "language": pq.language,
+            "needs_retrieval": pq.needs_retrieval,
+            "is_follow_up": pq.is_follow_up,
+            "model_status": pq.meta.get("status") or {},
+            "retrieval_ran": retrieval is not None,
+            "applied_filters": (retrieval or {}).get("applied_filters") or {},
+            "relaxed_keys": (retrieval or {}).get("relaxed_keys") or [],
+            "total_candidates": (retrieval or {}).get("total_candidates"),
+        },
     }})
     return events
 

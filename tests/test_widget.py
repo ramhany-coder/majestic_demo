@@ -58,6 +58,9 @@ def test_products_turn_streams_message_products_done():
     assert events[0]["data"] == {"text": "intro", "path": "products_only", "language": "ar", "health": False}
     assert events[1]["data"]["total"] == 4
     assert events[1]["data"]["items"][0]["why"] == {"concerns": ["hair loss"]}
+    pipeline = events[2]["data"]["pipeline"]
+    assert pipeline["retrieval_ran"] is True and pipeline["total_candidates"] == 4
+    assert pipeline["applied_filters"] == {"concerns": ["hair loss"]}
 
 
 def test_health_answers_are_flagged_for_the_disclaimer():

@@ -4,6 +4,7 @@ generated typo test (targets: top-1 >= 95%, top-3 >= 99%)."""
 import pytest
 
 from agents.retrieval.index_builder import get_index
+from config import settings
 from agents.retrieval.name_search import (
     bigrams, dice, is_arabic, match_name, normalize_name_ar, normalize_name_en, search_names,
 )
@@ -63,7 +64,7 @@ def test_both_acceptance_checks_apply():
     assert hits == []                                                   # nothing clears the Dice floor
     hits, _ = match_name("capixy intense dry foam", idx.names_en)
     assert hits[0].handle == "capixy-dry-foam-120-ml" and hits[0].score == 1.0
-    assert all(h.score >= 0.8 and h.dice >= 0.35 for h in hits)
+    assert all(h.score >= 0.8 and h.dice >= settings.RETRIEVAL_NAME_DICE_MIN for h in hits)
 
 
 def test_a_product_line_matches_its_variants():
@@ -81,9 +82,8 @@ def test_search_names_pairs_english_and_arabic():
 
 def test_dice_floor_is_what_rejects_long_weak_matches():
     # "Nonexistent Thing" shares common bigrams with a long deodorant name:
-    # Dice 0.35 exactly, so the plan's floor accepts it and a higher one does
-    # not (ARCHITECTURE_NOTES.md section 10, "Dice threshold sweep").
-    from config import settings
+    # Dice 0.35 exactly, so the plan's floor accepts it and the default 0.45
+    # does not (ARCHITECTURE_NOTES.md section 10, "Dice threshold sweep").
     idx = get_index()
     assert match_name("Nonexistent Thing", idx.names_en, dice_min=0.35)[0]
     assert match_name("Nonexistent Thing", idx.names_en, dice_min=0.45)[0] == []

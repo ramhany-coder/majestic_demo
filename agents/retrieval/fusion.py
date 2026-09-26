@@ -9,6 +9,8 @@
           + unmatched_exclude   per unmatched exclude term mentioned in the description (negative),
             or exclude_free instead when the text says "<term>-free" / "free from <term>" / "contains no <term>"
           + bundle              if the product is a bundle (negative)
+          + all_skin_types      if it fits a requested skin type only through "all skin types" (negative),
+            so exact skin-type labels rank first
 
 Weights are RETRIEVAL_FUSION_WEIGHTS. Out-of-stock products always rank below
 in-stock ones; ties break on name score, then lower price, then handle.
@@ -19,7 +21,8 @@ from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Dict, Iterable, List, Optional
 
-from agents.retrieval.index_builder import RetrievalIndex
+from agents.retrieval.filters import ALL_SKIN_TYPES, SKIN_TYPES
+from agents.retrieval.index_builder import RetrievalIndex, field_values
 from config import settings
 from models.filter_extractor import MetadataFilters
 
@@ -99,6 +102,10 @@ def score_product(index: RetrievalIndex, handle: str, filters: Optional[Metadata
         matched = len(set(filters.concerns) & set(p.get("concerns") or []))
         if matched > 1:
             add("extra_concern", f"extra_concerns:{matched - 1}", matched - 1)
+        wanted, suits = set(filters.suitable_for), set(field_values(p, "suitable_for"))
+        if (settings.RETRIEVAL_ALL_SKIN_TYPES_MATCH and ALL_SKIN_TYPES in suits and wanted & SKIN_TYPES
+                and not wanted & suits):
+            add("all_skin_types", "all_skin_types")
         for term in filters.unmatched.exclude:
             if says_free_of(desc, term):
                 add("exclude_free", f"free_of:{term}")

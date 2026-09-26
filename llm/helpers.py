@@ -1,5 +1,5 @@
 class Helpers:
-    routers_list = ["anthropic", "gemini", "gpt", "groq", "ollama"]
+    routers_list = ["anthropic", "gemini", "gpt", "groq", "ollama", "zai"]
 
     @staticmethod
     def validate_router(router: str) -> str:

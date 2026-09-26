@@ -1,9 +1,11 @@
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Union
 
+from langchain_core.messages import SystemMessage
 from pydantic import BaseModel
 from llm.helpers import Helpers
 from llm.llm_models import client_llm
@@ -12,11 +14,29 @@ logger = logging.getLogger("llm.fallback")
 
 
 def parse_route(route: str) -> tuple:
-    """'groq' -> ('groq', None); 'groq:openai/gpt-oss-20b' -> ('groq', 'openai/gpt-oss-20b').
+    """'zai' -> ('zai', None); 'zai:glm-5.3-flash' -> ('zai', 'glm-5.3-flash').
     A route with an explicit model overrides the model configured for that router,
     so one fallback chain can try two models on the same provider."""
     router, _, model = route.partition(":")
     return Helpers.validate_router(router), (model or None)
+
+
+# Routers whose API has no json_schema response_format and no forced tool
+# choice (Z.ai: response_format json_object only, tool_choice "auto" only).
+# They get JSON mode, with the schema written into the system prompt instead.
+JSON_MODE_ROUTERS = {"zai"}
+
+
+def with_schema_prompt(message: Any, schema: Union[type, dict]) -> Any:
+    """Add the output schema to the system message, for JSON-mode routers."""
+    as_dict = schema.model_json_schema() if isinstance(schema, type) else schema
+    note = ("Reply with one JSON object only, no prose, matching this JSON schema:\n"
+            + json.dumps(as_dict, ensure_ascii=False, separators=(",", ":")))
+    if not isinstance(message, list):
+        return message
+    if message and isinstance(message[0], SystemMessage):
+        return [SystemMessage(content=f"{message[0].content}\n\n{note}")] + list(message[1:])
+    return [SystemMessage(content=note)] + list(message)
 
 
 class AllRoutesFailed(RuntimeError):
@@ -49,6 +69,7 @@ class FallBack:
         llm_gpt: Optional[str] = None,
         llm_gemini: Optional[str] = None,
         llm_groq: Optional[str] = None,
+        llm_zai: Optional[str] = None,
     ):
         # Map the router names to their specific model strings
         self.llms: Dict[str, str] = {}
@@ -63,6 +84,8 @@ class FallBack:
             self.llms["gemini"] = llm_gemini
         if llm_groq:
             self.llms["groq"] = llm_groq
+        if llm_zai:
+            self.llms["zai"] = llm_zai
 
     def _resolve(self, route: str) -> tuple:
         router, model = parse_route(route)
@@ -116,8 +139,12 @@ class FallBack:
                 # json_schema uses native constrained decoding (response_format), not
                 # tool-calling -- avoids Groq's "model did not call a tool" failures
                 # that forced tool_choice can produce.
-                structured_llm = llm.with_structured_output(constraine_model, method="json_schema")
-                pydantic_response = structured_llm.invoke(message)
+                if router in JSON_MODE_ROUTERS:
+                    structured_llm = llm.with_structured_output(constraine_model, method="json_mode")
+                    pydantic_response = structured_llm.invoke(with_schema_prompt(message, constraine_model))
+                else:
+                    structured_llm = llm.with_structured_output(constraine_model, method="json_schema")
+                    pydantic_response = structured_llm.invoke(message)
 
                 # Return as a dictionary
                 return pydantic_response.model_dump()
@@ -176,10 +203,15 @@ class FallBack:
                 router, model_name = self._resolve(route)
                 kwargs = dict(model_kwargs[i]) if model_kwargs and i < len(model_kwargs) and model_kwargs[i] else {}
                 llm = client_llm.get_cached_model(router, model_name, **kwargs)
-                structured = llm.with_structured_output(
-                    constraine_model, method="json_schema", include_raw=True, strict=strict,
-                )
-                out = await asyncio.wait_for(structured.ainvoke(message), timeout=timeout)
+                if router in JSON_MODE_ROUTERS:
+                    structured = llm.with_structured_output(constraine_model, method="json_mode", include_raw=True)
+                    prompt = with_schema_prompt(message, constraine_model)
+                else:
+                    structured = llm.with_structured_output(
+                        constraine_model, method="json_schema", include_raw=True, strict=strict,
+                    )
+                    prompt = message
+                out = await asyncio.wait_for(structured.ainvoke(prompt), timeout=timeout)
                 if out.get("parsing_error") or out.get("parsed") is None:
                     raise ValueError(f"unparseable structured output: {out.get('parsing_error')}")
                 parsed = out["parsed"]

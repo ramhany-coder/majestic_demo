@@ -163,6 +163,7 @@
       eyebrow: 'Local demo',
       title: 'Ask Jamila',
       lede: "Majestic's assistant, wired to the chat pipeline: pre-qualification, filter extraction, retrieval and the reply. Product cards link to e-majestic.com.",
+      console: 'Query console',
       language: 'Language', audience: 'Audience', theme: 'Theme',
       audiences: { auto: 'Detected from the chat', customer: 'Customer', trainee: 'Sales trainee', professional: 'Doctor or pharmacist' },
       themes: { light: 'Light', dark: 'Dark', auto: 'Follow the system' },
@@ -172,6 +173,7 @@
       eyebrow: 'نسخة تجريبية محلية',
       title: 'اسأل جميلة',
       lede: 'مساعدة Majestic متوصلة بخط المحادثة كله: فهم الرسالة، واستخراج الفلاتر، والبحث في المنتجات، والرد. كروت المنتجات بتفتح على e-majestic.com.',
+      console: 'شاشة الأسئلة',
       language: 'اللغة', audience: 'المستخدم', theme: 'المظهر',
       audiences: { auto: 'حسب المحادثة', customer: 'عميل', trainee: 'متدرب مبيعات', professional: 'طبيب أو صيدلي' },
       themes: { light: 'فاتح', dark: 'غامق', auto: 'حسب الجهاز' },
@@ -207,15 +209,47 @@
 
   // ---------------------------------------------------------------- boot
 
+  // Streamlit's query console shows each turn's products with args.view
+  // 'cards': the widget's cards alone, sized to their content. Details come
+  // with the args, so the view needs no requests back to Python.
+  function cardsView(bridge) {
+    let shown = null;
+    let observer = null;
+    return (args, theme) => {
+      const locale = args.locale === 'ar' ? 'ar' : 'en';
+      const key = JSON.stringify([locale, theme, (args.products || []).map((p) => p.handle)]);
+      if (key === shown) return;
+      shown = key;
+      document.documentElement.classList.add('is-cards');
+      const details = args.details || {};
+      host.textContent = '';
+      host.append(Jamila.ProductResults(args.products || [], {
+        locale: locale, dir: dirFor(locale), theme: theme,
+        details: (handle) => Promise.resolve(details[handle] || null),
+      }));
+      if (!observer) {
+        const fit = () => bridge.setHeight(Math.ceil(host.getBoundingClientRect().height) + 4);
+        observer = new ResizeObserver(fit);
+        observer.observe(host);
+        fit();
+      }
+    };
+  }
+
   if (inStreamlit) {
     document.documentElement.classList.add('is-embedded');
     const bridge = streamlitBridge();
     const transport = streamlitTransport(bridge);
+    const renderCards = cardsView(bridge);
     let widget = null;
     let audience = null;
     let theme = null;
     bridge.onRender((args, msg) => {
       const nextTheme = msg.theme && msg.theme.base === 'dark' ? 'dark' : 'light';
+      if (args.view === 'cards') {
+        renderCards(args, nextTheme);
+        return;
+      }
       if (!widget) {
         const locale = readPref('locale') || args.locale || 'en';
         setDocumentLanguage(locale);

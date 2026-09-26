@@ -144,7 +144,10 @@ async def extract_filters(query: Optional[str], context: Optional[Sequence[str]]
     return f
 
 
-_WARMUP_URLS = {"groq": "https://api.groq.com/openai/v1/models"}
+_WARMUP_URLS = {
+    "groq": ("https://api.groq.com/openai/v1/models", lambda: settings.GROQ_API),
+    "zai": (settings.ZAI_BASE_URL.rstrip("/") + "/models", lambda: settings.ZAI_API_KEY),
+}
 
 
 async def warm_up(connections: int = len(CALL_FUNCTIONS)) -> int:
@@ -153,11 +156,11 @@ async def warm_up(connections: int = len(CALL_FUNCTIONS)) -> int:
     real fan-out doesn't pay 10 TLS handshakes. Call once at app startup, inside
     the event loop that will serve requests. Returns how many succeeded."""
     router, _ = parse_route(EXTRACTOR_FALLBACK_ORDER[0])
-    url = _WARMUP_URLS.get(router)
+    url, key = _WARMUP_URLS.get(router, (None, lambda: None))
     client = shared_async_http_client()
-    if not url or client is None or not settings.GROQ_API:
+    if not url or client is None or not key():
         return 0
-    headers = {"Authorization": f"Bearer {settings.GROQ_API}"}
+    headers = {"Authorization": f"Bearer {key()}"}
     results = await asyncio.gather(*(client.get(url, headers=headers) for _ in range(connections)),
                                    return_exceptions=True)
     return sum(1 for r in results if not isinstance(r, BaseException) and r.status_code == 200)

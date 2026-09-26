@@ -7,6 +7,7 @@ import time
 import pytest
 
 import agents.filter_extractor.agent as agent_module
+import agents.filter_extractor.calls as calls_module
 import llm.fallback as fallback_module
 from agents.filter_extractor.agent import extract_filters, filter_extractor, get_cache, is_small_talk
 from config import settings
@@ -56,6 +57,8 @@ def behaviour(monkeypatch):
     b = {"calls": []}
     monkeypatch.setattr(fallback_module.client_llm, "get_cached_model",
                         lambda router, model, **kw: FakeModel(model, b))
+    # Two distinct test routes, whatever the configured defaults are.
+    monkeypatch.setattr(calls_module, "EXTRACTOR_FALLBACK_ORDER", [PRIMARY, FALLBACK])
     monkeypatch.setattr(settings, "EXTRACTOR_TIMEOUT_S", 0.2)
     monkeypatch.setattr(settings, "EXTRACTOR_FALLBACK_TIMEOUT_S", 0.2)
     monkeypatch.setattr(settings, "EXTRACTOR_CALL_DEADLINE_S", 0.5)

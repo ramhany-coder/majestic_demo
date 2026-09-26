@@ -58,9 +58,9 @@ Its interface (`respond(ResponderContext) -> str`) is final.
 |---|---|---|
 | `PREQUAL_PRIMARY_ROUTE` / `PREQUAL_FALLBACK_ROUTE` | the `EXTRACTOR_*` routes | fast-tier models for the rewriter and router |
 | `PREQUAL_REWRITER_MAX_TOKENS` / `PREQUAL_ROUTER_MAX_TOKENS` | `120` / `40` | completion caps |
-| `PREQUAL_REWRITER_TIMEOUT_S` / `PREQUAL_ROUTER_TIMEOUT_S` | `2.0` / `1.5` | primary-attempt timeouts |
-| `PREQUAL_FALLBACK_TIMEOUT_S` | `2.0` | fallback-attempt timeout |
-| `PREQUAL_REWRITER_DEADLINE_S` / `PREQUAL_ROUTER_DEADLINE_S` | `3.5` / `3.0` | hard cap per call, across both attempts |
+| `PREQUAL_REWRITER_TIMEOUT_S` / `PREQUAL_ROUTER_TIMEOUT_S` | `4.0` / `4.0` | primary-attempt timeouts |
+| `PREQUAL_FALLBACK_TIMEOUT_S` | `4.0` | fallback-attempt timeout |
+| `PREQUAL_REWRITER_DEADLINE_S` / `PREQUAL_ROUTER_DEADLINE_S` | `8.0` / `8.0` | hard cap per call, across both attempts |
 | `PREQUAL_HISTORY_MESSAGES` | `6` | messages of history sent to both calls |
 | `PREQUAL_HISTORY_USER_CHARS` / `PREQUAL_HISTORY_ASSISTANT_CHARS` | `300` / `150` | per-message cuts |
 | `PREQUAL_LAST_PRODUCTS` | `5` | products from the previous turn, for "the second one" |
@@ -85,10 +85,14 @@ a `RetrievalResult` (`models/retrieval.py`):
   `refine_products` only, the rest of the list is the filtered candidates,
   ranked by semantic score plus small boosts. The filters are AND across keys
   and OR within a key; `ingredients.include` means all, and
-  `ingredients.exclude` is never relaxed.
+  `ingredients.exclude` always applies.
+- **Only products matching every requested key.** When none do, the list
+  is empty and the reply says no exact match was found. `meta.near_miss_keys`
+  names the keys that, dropped alone, would have matched something.
+  `RETRIEVAL_RELAX_FILTERS=true` brings back the plan's relaxation.
 - **Cut to `k`.**
 
-The result also lists the relaxed filter keys, the unresolved names, and the
+The result also lists the unresolved names, any relaxed filter keys, and the
 fallback used (`semantic_only` or `no_semantic`), so the responder can explain
 a partial match.
 
@@ -96,10 +100,13 @@ a partial match.
 |---|---|---|
 | `RETRIEVAL_K_DEFAULT` / `RETRIEVAL_K_MAX` | `10` / `20` | products per turn when the router gives no `k`, and the cap |
 | `RETRIEVAL_BM25_K1` / `RETRIEVAL_BM25_B` | `1.2` / `0.3` | name BM25 parameters (low `b`: names are short) |
-| `RETRIEVAL_NAME_REL_SCORE` / `RETRIEVAL_NAME_DICE_MIN` | `0.8` / `0.35` | a name hit needs BM25 ≥ 0.8 × the top score and bigram Dice ≥ 0.35 |
+| `RETRIEVAL_NAME_REL_SCORE` / `RETRIEVAL_NAME_DICE_MIN` | `0.8` / `0.45` | a name hit needs BM25 ≥ 0.8 × the top score and bigram Dice ≥ 0.45 (the plan's 0.35 let long unrelated names through) |
 | `RETRIEVAL_NAME_MAX_HITS` | `10` | hits kept per queried name (product lines have several variants) |
 | `RETRIEVAL_FILL_INTENTS` | `find_products,refine_products` | intents whose list is filled after the name hits |
 | `RETRIEVAL_BUNDLE_RULE` | `true` | drop bundles unless asked for (type bundle, group Bundles & Offers, a named bundle, or `price_offer`) |
+| `RETRIEVAL_ALL_SKIN_TYPES_MATCH` | `true` | a specific skin type (oily, dry, ...) also matches products labeled "all skin types", which rank after exact labels; `false`: exact labels only |
+| `RETRIEVAL_RELAX_FILTERS` | `false` | `false`: only products matching every requested key are shown; when none do, the list is empty and the reply says so. `true`: the plan's relaxation (drop keys in a fixed order until something matches) |
+| `RETRIEVAL_FORM_VARIANTS` | `true` | a form also matches forms containing it ("cream" → "cream gel", "tinted cream"), and a form that only restates the type ("lotion" with "body lotion") is not applied |
 | `RETRIEVAL_FUSION_WEIGHTS` | see `config.py` | JSON overrides for the boosts (available, best seller, unmatched terms, bundle, ...) |
 | `RETRIEVAL_SEMANTIC_ENABLED` | `true` | `false`: no model is loaded, and the ranking uses filters, names and boosts only |
 | `RETRIEVAL_EMBEDDING_ROUTE` | `hf:sentence-transformers/all-MiniLM-L6-v2` | `hf:`, `gpt:`, `gemini:` or `ollama:` plus a model (`llm/embeddings.py`) |
@@ -111,7 +118,7 @@ a partial match.
 
 ```bash
 pip install -r requirements.txt
-cp .env.example .env        # set GROQ_API (and optionally the EXTRACTOR_* settings)
+cp .env.example .env        # set ZAI_API_KEY (and optionally the EXTRACTOR_* settings)
 make test                   # offline unit tests
 make eval-rules             # offline eval of the rule-based fallback
 make eval                   # live eval: per-key precision/recall, exact match, p50/p95
@@ -171,23 +178,30 @@ A failing stage endpoint returns HTTP 500 with `failed_stage`,
 
 ## Frontend: the Jamila widget
 
-`web/` holds the customer-facing chat panel, Ask Jamila / اسأل جميلة: bilingual
-(Arabic RTL and English), with product cards, answer cards and a cart toast. It
-is wired to `handle_message` through two hosts:
+Two front ends, both wired to `handle_message`:
+
+- **Query console** (the default page): type any query, in Arabic, Arabizi or
+  English, and read the reply with what the pipeline did (rewritten request,
+  route, intent, applied filters, timings). Matched products show as the
+  widget's product cards (with Add to cart and Details); turning off "Show
+  matched products" leaves just their count.
+- **Widget preview**: the customer-facing chat panel, Ask Jamila / اسأل جميلة,
+  bilingual (Arabic RTL and English), with product cards, answer cards and a cart toast.
 
 ```bash
-uvicorn api.app:app --reload          # or: make serve     -> http://127.0.0.1:8000/
-streamlit run streamlit_app.py        # or: make streamlit -> http://localhost:8501/
+uvicorn api.app:app --reload          # or: make serve     -> http://127.0.0.1:8000/ (console), /index.html (widget)
+streamlit run streamlit_app.py        # or: make streamlit -> http://localhost:8501/ (mode switch in the sidebar)
 ```
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/` | The widget's demo page (`web/index.html`) |
+| `GET` | `/` | The query console (`web/console.html`), using `POST /chat` |
+| `GET` | `/index.html` | The widget's demo page |
 | `POST` | `/chat` | One chat turn as server-sent events: `status`, `message`, `products`, `done` |
 | `GET` | `/api/products/{handle}` | Answer-card details: key ingredients, how to use, warnings |
 
 **Streamlit Community Cloud:** main file `streamlit_app.py`, Python 3.12, and
-`GROQ_API` in the app's secrets. See [web/README.md](web/README.md) for
+`ZAI_API_KEY` in the app's secrets. See [web/README.md](web/README.md) for
 deployment, the `/chat` contract, the design tokens and the content rules.
 
 ## Configuration
@@ -196,12 +210,12 @@ All settings are environment variables read in `config.py`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `EXTRACTOR_PRIMARY_ROUTE` | `groq:qwen/qwen3.8-27b` | `router:model` for the first attempt |
-| `EXTRACTOR_FALLBACK_ROUTE` | `groq:openai/gpt-oss-20b` | tried once if the primary fails |
+| `EXTRACTOR_PRIMARY_ROUTE` | `zai:glm-5.3-flash` | `router:model` for the first attempt |
+| `EXTRACTOR_FALLBACK_ROUTE` | `zai:glm-5.3-flash` | tried once if the primary fails (same model: one retry) |
 | `EXTRACTOR_USE_FALLBACK_MODEL` | `true` | turns the fallback model on or off |
 | `EXTRACTOR_USE_RULE_FALLBACK` | `true` | turns the deterministic per-key fallback on or off |
-| `EXTRACTOR_TIMEOUT_S` / `EXTRACTOR_FALLBACK_TIMEOUT_S` | `2.5` / `2.5` | per-attempt timeouts |
-| `EXTRACTOR_CALL_DEADLINE_S` | `4.5` | hard cap per call, across both attempts |
+| `EXTRACTOR_TIMEOUT_S` / `EXTRACTOR_FALLBACK_TIMEOUT_S` | `4.0` / `4.0` | per-attempt timeouts |
+| `EXTRACTOR_CALL_DEADLINE_S` | `8.0` | hard cap per call, across both attempts |
 | `EXTRACTOR_CALL_TIMEOUTS` | `{}` | per-call primary timeout overrides, as JSON |
 | `EXTRACTOR_MAX_TOKENS` | the plan's table | per-call `max_tokens` overrides, as JSON |
 | `EXTRACTOR_TRANSLATE` | `false` | adds a rewrite-to-English call before the fan-out |

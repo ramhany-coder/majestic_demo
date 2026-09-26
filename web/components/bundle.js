@@ -618,6 +618,60 @@
     };
   }
 
+  /* The widget's product cards outside the chat panel (the query console):
+     the carousel, Details opening the answer card underneath, and Add to cart
+     confirmed inline. opts: locale, dir, theme, details(handle) -> Promise,
+     cart, linkTarget. Returns a self-contained .j-root; set dir explicitly,
+     since locale never sets direction. */
+  function ProductResults(products, opts) {
+    const o = Object.assign({ locale: 'en', dir: 'ltr', theme: 'light', details: null, cart: null, linkTarget: '_blank' }, opts);
+    const s = strings(o.locale);
+    const cart = o.cart || localCart();
+    const cache = new Map();
+    const note = h('div', { class: 'j-results-note' });
+    const answer = h('div', { class: 'j-results-answer' });
+    let open = null;
+
+    function onAdd(p) {
+      Promise.resolve(cart.add(p)).catch(() => null).then((res) => {
+        note.textContent = '';
+        note.append(Toast({
+          text: s.added + ': ' + localName(p, o.locale),
+          action: res && res.checkoutUrl ? { label: s.checkout, href: res.checkoutUrl } : null,
+        }));
+      });
+    }
+
+    async function onDetails(p) {
+      answer.textContent = '';
+      if (open === p.handle) {
+        open = null;
+        return;
+      }
+      open = p.handle;
+      answer.append(h('p', { class: 'j-status' }, h('span', { class: 'j-dots', 'aria-hidden': 'true' }, h('i'), h('i'), h('i')), s.loadingDetails));
+      let d = cache.get(p.handle);
+      try {
+        d = d || await o.details(p.handle);
+      } catch (e) {
+        d = null;
+      }
+      if (open !== p.handle) return;
+      answer.textContent = '';
+      if (d) {
+        cache.set(p.handle, d);
+        answer.append(AnswerCard(d, { locale: o.locale, onAdd: onAdd, linkTarget: o.linkTarget }));
+      } else {
+        answer.append(h('p', { class: 'j-note' }, Icon('alert', { size: 'sm' }), h('span', null, s.detailsError)));
+      }
+    }
+
+    return h('div', { class: 'j-root j-results', lang: o.locale, dir: o.dir, dataset: { locale: o.locale, jTheme: o.theme, density: 'comfortable' } },
+      Carousel(products, { locale: o.locale, onAdd: onAdd, onDetails: o.details ? onDetails : null, linkTarget: o.linkTarget }),
+      note,
+      answer);
+  }
+
   // ---------------------------------------------------------------- mount
 
   const PERSONA_AUDIENCE = { doctor: 'professional', sales_trainee: 'trainee', customer: 'customer' };
@@ -1008,6 +1062,7 @@
     Footer: Footer,
     Toast: Toast,
     localCart: localCart,
+    ProductResults: ProductResults,
     pickCard: pickCard,
     whyLine: whyLine,
     money: money,

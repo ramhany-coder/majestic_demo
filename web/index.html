@@ -9,6 +9,8 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
   <link rel="stylesheet" href="tokens.css">
+  <!-- For the Streamlit cards view; the widget links its own copy into its Shadow DOM. -->
+  <link rel="stylesheet" href="components/bundle.css">
   <style>
     /* Host page only. The widget brings its own styles into its Shadow DOM. */
     html, body { margin: 0; min-height: 100%; }
@@ -37,6 +39,8 @@
     .demo-eyebrow { margin: 0; font: var(--j-type-caption); color: var(--j-ink-muted); }
     .demo h1 { margin: 0; font: var(--j-type-title); font-size: 28px; line-height: 36px; }
     .demo-lede { margin: 0; color: var(--j-ink-muted); }
+    .demo p { margin: 0; }
+    .demo-link { color: var(--j-brand-ink); text-underline-offset: 3px; }
     html[lang="ar"] .demo-eyebrow { font: var(--j-type-caption-ar); }
     html[lang="ar"] .demo h1 { font: var(--j-type-title-ar); font-size: 28px; line-height: 40px; }
     .demo-controls {
@@ -63,6 +67,8 @@
     .is-embedded .demo-announce, .is-embedded .demo { display: none; }
     .is-embedded, .is-embedded body { height: 100%; background: transparent; }
     .is-embedded #jamila { position: fixed; inset: 0; }
+    .is-cards, .is-cards body { height: auto; }
+    .is-cards #jamila { position: static; }
   </style>
 </head>
 <body>
@@ -71,6 +77,7 @@
     <p class="demo-eyebrow" data-copy="eyebrow">Local demo</p>
     <h1 data-copy="title">Ask Jamila</h1>
     <p class="demo-lede" data-copy="lede"></p>
+    <p><a class="demo-link" href="/" data-copy="console">Query console</a></p>
     <form class="demo-controls" onsubmit="return false">
       <label><span data-copy="language">Language</span>
         <select id="demo-locale">

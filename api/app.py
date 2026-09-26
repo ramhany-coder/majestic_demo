@@ -4,6 +4,7 @@ from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
@@ -55,10 +56,16 @@ def health():
     return {"status": "ok"}
 
 
-# The Jamila widget and its demo page, mounted last so the API routes win.
+@app.get("/", include_in_schema=False)
+def console():
+    """The query console: any query through the pipeline, product listings optional."""
+    return FileResponse(WEB_DIR / "console.html")
+
+
+# The Jamila widget (/index.html) and its assets, mounted last so the API routes win.
 app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
 
 
 # Run from the repo root with:
 #   uvicorn api.app:app --reload
-# then open http://127.0.0.1:8000/ for the widget.
+# then open http://127.0.0.1:8000/ for the query console, /index.html for the widget.

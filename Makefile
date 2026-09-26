@@ -2,11 +2,11 @@ PY ?= python
 
 .PHONY: serve streamlit web web-check test eval eval-rules eval-prequal eval-prequal-e2e eval-retrieval smoke catalogs catalogs-check
 
-# API server and the Jamila widget: open http://127.0.0.1:8000/ (see web/README.md).
+# API server: the query console at http://127.0.0.1:8000/, the widget at /index.html (see web/README.md).
 serve:
 	$(PY) -m uvicorn api.app:app --reload
 
-# The same widget on Streamlit, with the pipeline in-process (streamlit_app.py).
+# Streamlit: the query console (default) or the widget, with the pipeline in-process.
 streamlit:
 	$(PY) -m streamlit run streamlit_app.py
 

@@ -12,6 +12,7 @@ from agents.prequal.schemas import INTENTS
 from agents.retrieval.agent import retrieve
 from agents.retrieval.index_builder import get_index
 from agents.retrieval.semantic import SemanticScores
+from config import settings
 from models.filter_extractor import MetadataFilters
 from scripts.eval_retrieval import score_row
 
@@ -63,12 +64,22 @@ def test_plan_case_hair_serum_without_silicone():
     assert set(res.handles) == set(BY_ID["r01"]["relevant"])
 
 
-def test_plan_case_sunscreen_spray_relaxes_the_form():
+def test_plan_case_sunscreen_spray_finds_the_all_skin_types_spray():
+    # The plan expected product_form to be relaxed; with "all skin types"
+    # matching oily skin (RETRIEVAL_ALL_SKIN_TYPES_MATCH) the spray is exact.
     res = run(BY_ID["r02"])
-    assert res.relaxed_keys == ["product_form"] and all(p.product_type == "sunscreen" for p in res.products)
+    assert res.relaxed_keys == [] and res.handles == BY_ID["r02"]["relevant"]
 
 
-def test_plan_case_pregnant_without_retinol_or_salicylic():
+def test_pregnant_without_retinol_or_salicylic_has_no_exact_match():
+    # No face serum is labeled pregnancy, so strict matching (the default)
+    # returns nothing. Either key alone would match something.
+    res = run(BY_ID["r03"])
+    assert res.products == [] and res.meta["near_miss_keys"] == ["product_type", "suitable_for"]
+
+
+def test_plan_case_pregnant_without_retinol_or_salicylic(monkeypatch):
+    monkeypatch.setattr(settings, "RETRIEVAL_RELAX_FILTERS", True)
     res = run(BY_ID["r03"])
     assert res.relaxed_keys == ["suitable_for"]
     assert set(res.handles) == set(BY_ID["r03"]["relevant"])

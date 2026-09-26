@@ -10,7 +10,9 @@ Order of the result (ARCHITECTURE_NOTES.md section 10):
    kept with conflict "contains_excluded"; one failing another requested
    filter gets "filter_mismatch".
 2. Then, for the RETRIEVAL_FILL_INTENTS (find / refine) or when no name was
-   resolved, the filtered candidates C (filters.py) ranked by fusion.py.
+   resolved, the filtered candidates C (filters.py) ranked by fusion.py. By
+   default C holds only products matching every requested key, so it can be
+   empty; meta.near_miss_keys then names the keys that stood in the way.
 Duplicates are removed and the list is cut to k.
 """
 
@@ -133,6 +135,8 @@ def retrieve(filters: Optional[MetadataFilters], sem: Optional[SemanticScores] =
             "semantic": sem.status,
             "fallbacks": fallbacks,
             "relaxed_values": {key: fo.requested[key] for key in fo.relaxed_keys},
+            "near_miss_keys": fo.near_miss_keys,
+            "implied_keys": fo.implied_keys,
             "bundles_allowed": fo.bundles_allowed,
             "excluded_count": len(fo.excluded),
             "filters_skipped": filters is None,

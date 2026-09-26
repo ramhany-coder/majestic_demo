@@ -175,8 +175,14 @@ def test_product_details(client):
     assert client.get("/api/products/nope").status_code == 404
 
 
-def test_widget_page_is_served(client):
+def test_root_is_the_query_console(client):
     r = client.get("/")
+    assert r.status_code == 200 and "console.js" in r.text and "Show matched products" in r.text
+    assert client.get("/console.js").status_code == 200
+
+
+def test_widget_page_is_served(client):
+    r = client.get("/index.html")
     assert r.status_code == 200 and "components/bundle.js" in r.text
     assert client.get("/components/bundle.js").status_code == 200
     assert client.get("/tokens.css").status_code == 200

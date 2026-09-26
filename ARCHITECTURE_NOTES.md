@@ -582,22 +582,38 @@ an idle host):
 - **Exact filters** (`filters.py`):
   - OR within a key, AND across keys, `ingredients.include` all-of,
     `ingredients.exclude` any-of. Exclude is applied in every fallback.
-  - On an empty candidate set, keys are dropped one at a time:
-    `product_form → suitable_for → concerns → product_group → category →
-    hero_ingredient → ingredients.include → product_type → brand`.
-  - With every key dropped: the pool minus excluded products, and
-    `fallback = "semantic_only"`.
+  - A `suitable_for` filter naming a specific skin type (acne-prone,
+    combination, dry, oily, sensitive) also matches products labeled
+    `all skin types` (`RETRIEVAL_ALL_SKIN_TYPES_MATCH`). Asking for
+    `all skin types` itself stays exact.
+  - A `product_form` also matches catalog forms containing it as whole
+    words: "cream" → "cream gel", "tinted cream", "leave-in cream", "jelly
+    cream" (`RETRIEVAL_FORM_VARIANTS`). A form that only restates the
+    requested product_type ("lotion" with "body lotion") is not applied and is
+    reported in `meta.implied_keys`.
+  - **Strict by default:** only products matching every applied key are
+    returned. An empty candidate set stays empty, and `meta.near_miss_keys`
+    lists the keys that, dropped alone, would give products.
+  - With `RETRIEVAL_RELAX_FILTERS=true` (the plan), an empty candidate set
+    drops keys one at a time: `product_form → suitable_for → concerns →
+    product_group → category → hero_ingredient → ingredients.include →
+    product_type → brand`. With every key dropped: the pool minus excluded
+    products, and `fallback = "semantic_only"`.
   - Bundle rule: bundles stay only for product_type `bundle`, group
     `Bundles & Offers`, a bundle matched by name, or intent `price_offer`.
 - **Names** (`name_search.py`):
   - A hit needs BM25 ≥ 0.8 × the top score for that queried name and bigram
-    Dice ≥ 0.35. Up to 10 hits are kept per name.
+    Dice ≥ 0.45 (the plan said 0.35; see the sweep below). Up to 10 hits are
+    kept per name.
   - `name_en[i]` and `name_ar[i]` are the same name in two scripts. A name is
     unresolved only when neither form hits.
   - Queries are routed by script, so Arabic text in `name_en` still reaches
     the Arabic index.
 - **Semantic + fusion** (`semantic.py`, `fusion.py`):
   - `final = cosine + boosts`, with the weights in `RETRIEVAL_FUSION_WEIGHTS`.
+  - A product that fits the requested skin type only through `all skin types`
+    gets `all_skin_types` (−0.03), so exact labels rank first when the cosine
+    scores are close.
   - Out-of-stock products always rank below in-stock ones.
   - Tie-breakers: name score, then lower price, then handle.
   - The query embedding has a 1.5 s timeout and an LRU cache (`TTLCache`).
@@ -614,7 +630,8 @@ two additions:
   - `fallbacks`, listing both fallbacks when both happen; `fallback` holds the
     first, and `no_semantic` wins.
   - `relaxed_values`, the requested values of each relaxed key, so the
-    responder can say "no spray found, here are gels"
+    responder can say "no spray found, here are gels" (relaxation on only)
+  - `near_miss_keys` and `implied_keys` (see the filter step)
   - `bundles_allowed`
   - `excluded_count`
   - `filters_skipped`
@@ -624,8 +641,8 @@ Orchestrator hand-off:
 | Case | Result |
 |---|---|
 | `products_only`, products found, nothing relaxed | Templated intro + cards. Final. |
-| `products_only`, nothing found | Responder, reason `no_results` |
-| `products_only`, some keys relaxed | Responder, reason `relaxed` |
+| `products_only`, nothing matches every key | Responder, reason `no_results` |
+| `products_only`, some keys relaxed (relaxation on only) | Responder, reason `relaxed` |
 | `needs_response` | Responder, with the whole `RetrievalResult` in `ResponderContext.retrieval` |
 
 ### Router change (`k`)
@@ -670,23 +687,42 @@ Orchestrator hand-off:
   sentence, so lists like "free from ammonia, aluminum, and alcohol" match),
   and "no / 0% <term>". Plurals match both ways ("parabens" finds
   "paraben").
+- **Dice floor 0.45, not 0.35.** Applied on 2026-09-26 at the user's decision,
+  after the sweep below.
+- **"all skin types" matches a specific skin type.** The plan matches labels
+  exactly. Applied on 2026-09-26 at the user's decision, so "sunscreen spray
+  for oily skin" finds the one spray (labeled all skin types) instead of
+  relaxing the form. `RETRIEVAL_ALL_SKIN_TYPES_MATCH=false` restores the plan's
+  behavior.
+- **No relaxation by default.** Applied on 2026-09-26 at the user's request:
+  relaxed results repeated the same loosely related products across queries.
+  In 13 live queries, 4 relaxed a key, always `product_form`. For example,
+  "cream for dry skin" then listed a cleanser, micellar water and a serum,
+  and "moisturizer for sensitive skin" listed an acne-prone moisturizer. Now
+  only products matching every key are shown. Two changes keep strict
+  matching from coming back empty on wording alone: form variants ("cream"
+  matches "cream gel") and skipping a form that restates the type ("body
+  lotion" plus "lotion" finds the Body Milk). With these, 12 of the 13
+  queries find products, and the 13th (sensitive-skin moisturizer) has no
+  real match in the catalog. `RETRIEVAL_RELAX_FILTERS=true` restores the
+  plan's relaxation.
 - **Precision@k** is the relevant share of the returned list, not of `k`
   slots. **Recall@k** divides by `min(|relevant|, k)`. Otherwise a request
   with 2 relevant products and k=10 could never exceed 0.2 precision, and a
   k=3 request for 6 relevant products could never reach recall 1.0.
 
-### Dice threshold sweep (a recommendation, not applied)
+### Dice threshold sweep (applied: 0.45)
 
-The plan's Dice floor, 0.35, lets through long names that share only common
+The plan's Dice floor, 0.35, let through long names that share only common
 bigrams with the query: "Nonexistent Thing" matches a Vacation deodorant at
 exactly 0.35. The sweep used the 1,063 generated typo queries, plus 36 names
 that are not in the catalog (competitor products, invented Majestic names).
 
 | Dice floor | Typo top-1 | Typo top-3 | False accepts (of 36) |
 |---|---|---|---|
-| 0.35 (plan, default) | 0.956 | 0.994 | 23 |
+| 0.35 (plan) | 0.956 | 0.994 | 23 |
 | 0.40 | 0.957 | 0.994 | 20 |
-| 0.45 | 0.959 | 0.995 | 14 |
+| 0.45 (default) | 0.959 | 0.995 | 14 |
 | 0.50 | 0.962 | 0.994 | 13 |
 
 - **A higher floor costs no typo recall.** Top-1 even improves, because noisy
@@ -697,8 +733,9 @@ that are not in the catalog (competitor products, invented Majestic names).
 - **Risk is lower in practice.** The extractor's grounding already drops
   names without a Majestic brand or product line, so competitor names rarely
   reach retrieval.
-- **Recommendation:** `RETRIEVAL_NAME_DICE_MIN=0.45`. It was left at the
-  plan's 0.35 pending a decision.
+- **Applied:** `RETRIEVAL_NAME_DICE_MIN=0.45` became the default on
+  2026-09-26. A rerun of the typo test gave the sweep's numbers (top-1 0.959,
+  top-3 0.995), and all 5 real misspellings still resolve.
 
 ### Evaluation (2026-09-26)
 
@@ -708,22 +745,44 @@ not by what the filters return, so exact-match limits show up as misses.
 
 | Run | precision@k | recall@k | MRR | Forbidden products returned |
 |---|---|---|---|---|
-| Semantic on (all-MiniLM-L6-v2) | 0.874 | 0.949 | 0.960 | 0 rows |
-| Semantic off (`--no-semantic`) | 0.865 | 0.935 | 0.955 | 0 rows |
+| Strict (default), semantic on | 0.841 | 0.917 | 0.933 | 0 rows |
+| Strict, semantic off (`--no-semantic`) | 0.832 | 0.904 | 0.920 | 0 rows |
+| Relaxation on (`--relax`), semantic on | 0.865 | 0.953 | 0.960 | 0 rows |
+| Relaxation on, before the Dice and skin-type changes | 0.874 | 0.949 | 0.960 | 0 rows |
+
+- **Strict matching changes 2 of 56 rows,** both now empty:
+  - r03 (pregnant, face serum without retinol or salicylic acid): no serum
+    is labeled pregnancy. Relaxation showed 5 unlabeled serums; strict says
+    there is no exact match, which is arguably the safer answer here.
+  - r56 (cream for joint pain, with a wrongly extracted suitable_for):
+    relaxation recovered the Movelex creams, strict cannot. This is the cost
+    of strict matching when the extractor adds a wrong key.
+  - Both labels were kept, so the numbers above show that cost.
+
+- **Effect of the Dice floor and "all skin types" changes** (semantic on):
+  - Dice 0.45 alone: precision 0.874 → 0.877, recall and MRR unchanged.
+  - "all skin types": r02 now returns the one sunscreen spray as an exact
+    match. Its label was changed to that spray; the old label listed the
+    oily-skin gels a relaxed form would return.
+  - It also costs precision on r29 ("cleanser for oily, acne-prone skin"):
+    two all-skin-types cleansers now follow the one exact match (P 1.0 →
+    0.33). The label was kept, since it judges them less relevant.
 
 - **The plan's cases:**
   - hair serum without silicone: exact
-  - sunscreen spray for oily skin: form relaxed, recall 0.75 (see limits)
-  - pregnant, no retinol or salicylic acid: exact, nothing forbidden
+  - sunscreen spray for oily skin: the all-skin-types spray, exact (the plan
+    expected the form to be relaxed; see Deviations)
+  - pregnant, no retinol or salicylic acid: no exact match under strict
+    (empty, near-miss keys `product_type` and `suitable_for`); with
+    relaxation, the 5 serums without them, nothing forbidden
   - compare, deodorant line and k=3: all perfect
 - **Semantic adds little where filters exist** (+0.014 recall). It matters
   in the broad and filter-less rows.
 - **Misses are exact-match limits, not bugs:**
-  - r02: the "all skin types" spray isn't labeled oily skin
   - r21: only one balm is labeled "dry lips"
   - r22: the caffeine serum is typed eye serum, not eye cream
-  - r56: a wrongly extracted suitable_for makes relaxation drop product_form
-    first
+  - r56: a wrongly extracted suitable_for leaves no exact match (with
+    relaxation, it drops product_form first)
   - r47: raw Arabic with no filters, when the rewriter failed. The English
     model scores 0 there.
 
@@ -740,7 +799,8 @@ Before the precomputed BM25 vectors, the retrieval p95 was 9.0 ms.
 
 - 1,063 generated queries: English and Arabic, 5 variants per name (delete,
   swap, replace, 2 edits, brand dropped).
-- **top-1 0.956** (target ≥ 0.95) and **top-3 0.994** (target ≥ 0.99).
+- **top-1 0.959** (target ≥ 0.95) and **top-3 0.995** (target ≥ 0.99) at
+  Dice 0.45; 0.956 / 0.994 at the plan's 0.35.
 - All 5 real misspellings from the plan resolve.
 - The misses:
   - bundles whose names contain the single product's name, such as
@@ -758,8 +818,18 @@ Before the precomputed BM25 vectors, the retrieval p95 was 9.0 ms.
 - A full dev-set regression run of the router was started. It was stopped
   after 8 rows because qwen hit the account's 200k tokens-per-day cap, so the
   run would have measured the fallback model.
-- **Still to do:** re-run `python -u -m scripts.eval_prequal` once the cap
-  resets, to confirm route and intent accuracy with the new k line.
+- A second attempt ran to the end, but both qwen and gpt-oss-20b were at
+  their daily caps. 50 of 55 rows got the router's safe default, so its
+  totals (route 0.509) measure the default, not the router. The 2 rows that
+  did get a model answer were fully correct, including `k`.
+- The default routes then moved to `zai:glm-5.3-flash`. A 7-row probe of the
+  `count` rows got 401 "token expired or incorrect" from Z.ai, so every row
+  fell back to defaults. `logs/prequal_eval_results.jsonl` now holds that
+  probe, not a real measurement.
+- **Still to do:** once a working key is in place, run
+  `PYTHONIOENCODING=utf-8 python -u -m scripts.eval_prequal --extractor off`
+  to confirm route and intent accuracy with the new k line. Without the
+  encoding variable, the Windows console fails when printing Arabic rows.
 
 **End-to-end smoke test** (`python -m scripts.smoke_e2e`, live): six raw
 Arabic, Arabizi and English messages, each through prequal → extractor ∥
@@ -785,12 +855,16 @@ semantic → retrieval.
 
 ### Known limits
 
-- **"all skin types" does not satisfy a specific skin type.** Exact match
-  follows the plan, so the Sunscreen Spray (all skin types) is missing from
-  "sunscreen spray for oily skin". Treating `all skin types` as matching
-  every skin-type value would fix r02 and similar cases. It's a one-line
-  change in `filters.key_matches`.
-- **Relaxation drops by key order, not by key confidence.** A wrong
+- **"all skin types" widens skin-type requests.** Lists for a specific skin
+  type now include generic products after the exact labels (r29). Because an
+  all-skin-types product now satisfies the filter, relaxation stops earlier:
+  "sunscreen spray for oily skin" shows the one spray, not the oily-skin gels
+  as alternatives.
+- **Strict matching trusts every extracted key.** A key the extractor adds
+  by mistake (r56) or infers too narrowly leaves the list empty; the reply
+  then says no exact match was found. `meta.near_miss_keys` shows which key
+  was in the way.
+- **With relaxation on, keys are dropped by order, not by confidence.** A wrong
   suitable_for is dropped only after product_form, as in r56.
 - **The embedding model is English.** The rewriter-failed path embeds the raw
   message, so Arabic or Arabizi text scores near zero there. A multilingual

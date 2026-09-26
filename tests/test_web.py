@@ -84,3 +84,8 @@ def test_every_catalogue_value_on_a_card_has_an_arabic_label():
 
 def test_only_the_send_arrow_and_chevron_flip():
     assert "const FLIP = new Set(['send', 'chevron']);" in BUNDLE
+
+
+def test_the_console_shows_products_through_the_widgets_cards():
+    console = (BUNDLE_JS.parent.parent / "console.js").read_text(encoding="utf-8")
+    assert "Jamila.ProductResults(" in console and "ProductResults: ProductResults," in BUNDLE

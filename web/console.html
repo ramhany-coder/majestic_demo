@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jamila console</title>
+  <link rel="icon" href="assets/Icons/mark.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="components/bundle.css">
+  <style>
+    /* Query console: type any query, read the pipeline's reply. Product
+       listings are off unless "Show matched products" is on. */
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex; flex-direction: column;
+      background: var(--j-surface-sunken); color: var(--j-ink);
+      font: var(--j-type-body);
+    }
+    :focus-visible { outline: none; box-shadow: 0 0 0 2px var(--j-focus-offset), 0 0 0 4px var(--j-focus); }
+    .c-top {
+      display: flex; align-items: center; justify-content: space-between; gap: var(--j-space-4);
+      padding-block: var(--j-space-4); padding-inline: var(--j-space-6);
+      background: var(--j-surface-raised); border-block-end: 1px solid var(--j-border);
+    }
+    .c-top h1 { margin: 0; font: var(--j-type-title); }
+    .c-top p { margin: 0; font: var(--j-type-caption); color: var(--j-ink-muted); }
+    .c-link { font: var(--j-type-label); color: var(--j-brand-ink); text-underline-offset: 3px; }
+    .c-log {
+      flex: 1; min-block-size: 0; overflow-y: auto;
+      padding-block: var(--j-space-6); padding-inline: var(--j-space-4);
+    }
+    .c-log > * { max-inline-size: 760px; margin-inline: auto; }
+    .c-empty { color: var(--j-ink-muted); text-align: center; }
+    .c-turn { display: flex; flex-direction: column; gap: var(--j-space-2); margin-block-end: var(--j-space-6); }
+    .c-query {
+      align-self: flex-end; max-inline-size: 85%; margin: 0;
+      padding-block: var(--j-space-2); padding-inline: var(--j-space-4);
+      background: var(--j-surface-tint); border-radius: var(--j-radius-xl);
+      white-space: pre-line; overflow-wrap: anywhere;
+    }
+    .c-answer {
+      display: flex; flex-direction: column; gap: var(--j-space-2);
+      padding: var(--j-space-4);
+      background: var(--j-surface-raised); border: 1px solid var(--j-border); border-radius: var(--j-radius-lg);
+    }
+    .c-answer p { margin: 0; }
+    .c-reply { white-space: pre-line; overflow-wrap: anywhere; }
+    .c-reply:dir(rtl), [dir="rtl"].c-reply { font: var(--j-type-body-ar); }
+    .c-meta, .c-count, .c-status { font: var(--j-type-caption); color: var(--j-ink-muted); }
+    .c-error { color: var(--j-danger); font: var(--j-type-label); margin: 0; }
+    .c-disclaimer { font: var(--j-type-caption); color: var(--j-ink); background: var(--j-surface-tint); border-radius: var(--j-radius-md); padding: var(--j-space-2) var(--j-space-3); }
+    .c-details { border-block-start: 1px solid var(--j-border); padding-block-start: var(--j-space-2); }
+    .c-details summary { cursor: pointer; font: var(--j-type-label); color: var(--j-brand-ink); }
+    .c-details dl { margin: var(--j-space-2) 0 0; display: grid; grid-template-columns: max-content 1fr; gap: var(--j-space-1) var(--j-space-4); font: var(--j-type-caption); }
+    .c-details dt { color: var(--j-ink-muted); }
+    .c-details dd { margin: 0; overflow-wrap: anywhere; }
+    body:not(.show-products) .j-results { display: none; }
+    body.show-products .c-count { display: none; }   /* the carousel shows its own count */
+    body:not(.show-details) .c-details { display: none; }
+    .c-ask {
+      display: flex; flex-direction: column; gap: var(--j-space-2);
+      padding-block: var(--j-space-3) var(--j-space-4); padding-inline: var(--j-space-4);
+      background: var(--j-surface-raised); border-block-start: 1px solid var(--j-border);
+    }
+    .c-ask > * { inline-size: 100%; max-inline-size: 760px; margin-inline: auto; }
+    .c-input-row { display: flex; gap: var(--j-space-2); align-items: flex-end; }
+    .c-input-row textarea {
+      flex: 1; min-block-size: 44px; max-block-size: 160px; resize: vertical;
+      padding-block: 10px; padding-inline: var(--j-space-3);
+      border: 1px solid var(--j-border-strong); border-radius: var(--j-radius-md);
+      background: var(--j-surface); color: var(--j-ink); font: var(--j-type-body);
+    }
+    .c-input-row textarea::placeholder { color: var(--j-ink-subtle); }
+    .c-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--j-space-4); font: var(--j-type-label); }
+    .c-options label { display: inline-flex; align-items: center; gap: var(--j-space-2); cursor: pointer; }
+    .c-options input { inline-size: 16px; block-size: 16px; accent-color: var(--j-brand-ink); }
+    .c-btn {
+      min-block-size: 44px; padding-inline: var(--j-space-4);
+      border: 1px solid transparent; border-radius: var(--j-radius-md);
+      font: var(--j-type-label); cursor: pointer;
+    }
+    .c-btn--primary { background: var(--j-brand); color: var(--j-on-brand); }
+    .c-btn--secondary { min-block-size: 32px; background: var(--j-surface-raised); color: var(--j-ink); border-color: var(--j-border-strong); margin-inline-start: auto; }
+    .c-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+  </style>
+</head>
+<body>
+  <header class="c-top">
+    <div>
+      <h1>Jamila console</h1>
+      <p>Any query, in Arabic, Arabizi or English, through the full pipeline.</p>
+    </div>
+    <a class="c-link" href="index.html">Widget preview</a>
+  </header>
+  <main id="log" class="c-log" aria-live="polite">
+    <p class="c-empty">Type a query below. Follow-ups use the conversation so far, until you start a new session.</p>
+  </main>
+  <form id="ask" class="c-ask">
+    <div class="c-input-row">
+      <textarea id="q" rows="1" dir="auto" maxlength="2000" aria-label="Query"
+                placeholder="Type any query, for example: عايزة سيروم للشعر من غير سيليكون"></textarea>
+      <button id="send" class="c-btn c-btn--primary" type="submit">Send</button>
+    </div>
+    <div class="c-options">
+      <label><input type="checkbox" id="opt-products" checked> Show matched products</label>
+      <label><input type="checkbox" id="opt-details" checked> Show pipeline details</label>
+      <button id="new" class="c-btn c-btn--secondary" type="button">New session</button>
+    </div>
+  </form>
+  <script src="components/bundle.js"></script>
+  <script src="console.js"></script>
+</body>
+</html>

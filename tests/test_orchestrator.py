@@ -96,8 +96,20 @@ def test_intro_follows_language(env):
     assert turn(env, "show me sunscreens").reply == "Here are matching products:"
 
 
-def test_products_only_with_relaxed_filters_goes_to_responder(env):
-    # No sunscreen is a roll-on: product_form is relaxed, so the responder explains.
+def test_products_only_without_an_exact_match_goes_to_responder_with_no_results(env):
+    # No sunscreen is a roll-on. Strict matching (the default) shows nothing,
+    # and the responder gets the key that blocked the match.
+    env["prequal"] = pq("sunscreen roll on", "I need a sunscreen roll-on.", language="en")
+    env["filters"] = MetadataFilters(product_type=["sunscreen"], product_form=["roll-on"])
+    t = turn(env, "sunscreen roll on")
+    assert t.path == "responder" and t.products == []
+    ctx = env["respond_calls"][0]
+    assert ctx.reason == "no_results" and ctx.retrieval.meta["near_miss_keys"] == ["product_type", "product_form"]
+
+
+def test_products_only_with_relaxed_filters_goes_to_responder(env, monkeypatch):
+    # With RETRIEVAL_RELAX_FILTERS on, product_form is relaxed and the responder explains.
+    monkeypatch.setattr(settings, "RETRIEVAL_RELAX_FILTERS", True)
     env["prequal"] = pq("sunscreen roll on", "I need a sunscreen roll-on.", language="en")
     env["filters"] = MetadataFilters(product_type=["sunscreen"], product_form=["roll-on"])
     t = turn(env, "sunscreen roll on")

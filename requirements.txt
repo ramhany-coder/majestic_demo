@@ -23,8 +23,9 @@ tiktoken>=0.7.0
 numpy>=2.0
 rank-bm25>=0.2.2
 # Default embedding route hf:sentence-transformers/all-MiniLM-L6-v2 (local, no
-# API key). sentence-transformers pulls in torch; on a CPU-only host install
-# torch from https://download.pytorch.org/whl/cpu first to skip the CUDA wheels.
+# API key). sentence-transformers pulls in torch: the pin below covers Linux x86_64
+# / Python 3.12; other CPU-only hosts can install torch from
+# https://download.pytorch.org/whl/cpu first to skip the CUDA wheels.
 langchain-huggingface>=1.2.0
 sentence-transformers>=5.0
 # CPU-only torch on Linux / Python 3.12 hosts (Streamlit Community Cloud, CI,
