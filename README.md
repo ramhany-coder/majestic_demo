@@ -88,3 +88,68 @@ off-topic messages, and 2 follow-ups that use context. Each row has
 nor penalized; they cover judgment calls such as a parent category implied by
 a product type, or a concern implied by a skin type. Names are scored through
 `matched_handles`.
+
+## Latest results
+
+Holdout run on 2026-09-26: `python -u -m scripts.eval_extractor --mode llm --eval-file tests/eval_holdout.jsonl`,
+20 queries. Per-query output is in `logs/eval_results_llm_eval_holdout.jsonl`.
+
+| Metric | Result | Target | Status |
+|---|---|---|---|
+| Catalog precision (micro) | 0.881 | ≥ 0.90 | FAIL |
+| Catalog recall (micro) | 0.860 | ≥ 0.85 | PASS |
+| Exact-match rate | 13/20 = 0.650 | – | – |
+| Latency p50 | 671 ms | ≤ 1000 ms | PASS |
+| Latency p95 | 1819 ms | ≤ 2000 ms | PASS |
+| Latency max | 2909 ms | – | – |
+
+Latency counts only queries that did not short-circuit.
+
+### Per key
+
+| Key | Precision | Recall | TP | FP | FN |
+|---|---|---|---|---|---|
+| brand | 1.000 | 1.000 | 5 | 0 | 0 |
+| category | 1.000 | 1.000 | 0 | 0 | 0 |
+| product_group | 0.000 | 1.000 | 0 | 1 | 0 |
+| product_type | 1.000 | 0.889 | 8 | 0 | 1 |
+| product_form | 0.889 | 1.000 | 8 | 1 | 0 |
+| concerns | 1.000 | 0.667 | 6 | 0 | 3 |
+| suitable_for | 0.700 | 1.000 | 7 | 3 | 0 |
+| hero_ingredient | 1.000 | 0.000 | 0 | 0 | 2 |
+| include | 1.000 | 1.000 | 3 | 0 | 0 |
+| exclude | 1.000 | 1.000 | 0 | 0 | 0 |
+| handles | 1.000 | 0.800 | 4 | 0 | 1 |
+| **Catalog (micro)** | **0.881** | **0.860** | **37** | **5** | **6** |
+
+A key with no expected and no predicted values scores 1.000.
+
+### Per call
+
+| Call | p50 ms | p95 ms | Prompt tokens | Budget | Over budget |
+|---|---|---|---|---|---|
+| names | 510 | 1021 | 434 | 261 | +66% |
+| brand | 432 | 1813 | 398 | 207 | +92% |
+| category | 460 | 1420 | 333 | 187 | +78% |
+| product_group | 536 | 661 | 450 | 231 | +95% |
+| product_type | 473 | 984 | 631 | 342 | +85% |
+| product_form | 520 | 1309 | 438 | 216 | +103% |
+| concerns | 547 | 711 | 629 | 334 | +88% |
+| suitable_for | 485 | 790 | 479 | 267 | +79% |
+| hero_ingredient | 419 | 676 | 539 | 284 | +90% |
+| ingredients | 358 | 421 | 4011 | 1185 | +238% |
+
+Call statuses across all 200 calls: `fallback_model` 127, `rule_based` 53,
+`ok` 10, `skipped` 10.
+
+### Notes
+
+- Most calls (127 of 200) were answered by the fallback model and 53 by the
+  rule-based fallback. Only 10 were answered by the primary model, so these
+  numbers mostly describe the fallbacks, not the primary route.
+- Precision misses the target because of `suitable_for` (3 false positives),
+  `product_group` (1) and `product_form` (1).
+- Recall is weakest on `hero_ingredient` (0 of 2 found) and `concerns`
+  (6 of 9 found).
+- Every call's prompt is over its token budget. `ingredients` is the largest,
+  at 4011 tokens against a budget of 1185.
