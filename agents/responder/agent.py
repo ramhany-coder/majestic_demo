@@ -119,7 +119,7 @@ async def respond_stream(ctx: ResponderContext) -> AsyncIterator[dict]:
     yield _ev("status", {"stage": "writing"})
 
     for card in build_cards(ctx, products, reply_lang):
-        yield _ev("card", card)
+        yield _ev("card", {**card, "language": reply_lang})
 
     r2: Optional[asyncio.Task] = None
     if ctx.intent == "sales_training" and products:
@@ -191,7 +191,7 @@ async def respond_stream(ctx: ResponderContext) -> AsyncIterator[dict]:
             except Exception:  # noqa: BLE001 -- sales_card never raises; contain a bug
                 logger.exception("[responder] sales card task failed")
             if card is not None:
-                yield _ev("card", card)
+                yield _ev("card", {**card, "language": reply_lang})
             elif "sales_card_timeout" not in notes:
                 notes.append("sales_card_skipped")
 

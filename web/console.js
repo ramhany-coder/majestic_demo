@@ -161,12 +161,33 @@
       await stream(query, (event, data) => {
         if (event === 'status') {
           status.textContent = STAGES[data.stage] || '';
+        } else if (event === 'message' && data.disclaimer && data.delta !== undefined) {
+          // The responder's disclaimer, sent as the last chunk in the reply language.
+          status.before(h('p', { class: 'c-disclaimer', dir: 'auto' }, data.delta));
+        } else if (event === 'message' && (data.delta !== undefined || data.replace)) {
+          // The responder's answer as it streams (delta), or its corrected text (replace).
+          replied = true;
+          language = data.language || language;
+          if (!replyEl) {
+            replyEl = h('p', { class: 'c-reply', dir: 'auto' });
+            status.before(replyEl);
+          }
+          replyEl.textContent = data.replace ? (data.text || '') : replyEl.textContent + data.delta;
+          scrollToEnd();
         } else if (event === 'message') {
           replied = true;
           language = data.language || 'en';
           replyEl = h('p', { class: 'c-reply', dir: 'auto' }, data.text || '');
           status.before(replyEl);
-          if (data.health) status.before(h('p', { class: 'c-disclaimer' }, DISCLAIMER));
+          if (data.health) status.before(h('p', { class: 'c-disclaimer', dir: 'auto' }, data.disclaimer || DISCLAIMER));
+        } else if (event === 'card') {
+          const cardLanguage = data.language || language;
+          const locale = cardLanguage === 'ar' || cardLanguage === 'mixed' ? 'ar' : 'en';
+          const card = Jamila.ResponderCard(data, { locale: locale });
+          if (card) {
+            status.before(h('div', { class: 'j-root c-card', lang: locale, dir: locale === 'ar' ? 'rtl' : 'ltr',
+              'data-locale': locale, 'data-j-theme': 'light' }, card));
+          }
         } else if (event === 'products') {
           status.before(...renderProducts(data, language));
         } else if (event === 'done') {

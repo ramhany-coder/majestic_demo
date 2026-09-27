@@ -181,6 +181,15 @@ def test_root_is_the_query_console(client):
     assert client.get("/console.js").status_code == 200
 
 
+def test_web_files_are_revalidated_so_updates_load_on_reload(client):
+    # No heuristic caching: an updated console.js / bundle.js must reach the browser on a normal reload.
+    for path in ("/", "/console.js", "/components/bundle.js", "/index.html"):
+        r = client.get(path)
+        assert r.status_code == 200 and r.headers["cache-control"] == "no-cache", path
+    etag = client.get("/console.js").headers["etag"]
+    assert client.get("/console.js", headers={"If-None-Match": etag}).status_code == 304
+
+
 def test_widget_page_is_served(client):
     r = client.get("/index.html")
     assert r.status_code == 200 and "components/bundle.js" in r.text

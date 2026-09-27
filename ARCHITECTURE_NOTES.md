@@ -877,3 +877,342 @@ semantic → retrieval.
   semantic search off until the next start.
 - **The caches are per host.** Each worker keeps its own `models/embeddings/`
   and `cache/` copy.
+
+## 11. Responder (the written answer, optional final stage)
+
+The responder writes the answer when the turn needs text rather than just
+a product list. It replaces the stub `agents/responder/responder.py`
+described in section 9. The LLM writes the conversational text; code
+supplies everything factual that can be shown directly: step, safety and
+compare cards, the disclaimer, and template answers when the LLM fails.
+
+### When it runs
+
+| Case | Runs? | `mode` |
+|---|---|---|
+| `products_only`, products found, nothing relaxed | No. The templated intro and the product cards end the turn. | |
+| `products_only`, 0 products or `relaxed_keys` set | Yes: says there is no exact match, then presents the closest options | `no_match` |
+| `needs_response`, retrieval ran | Yes, with product data | `answer`, or `no_match` when retrieval found nothing |
+| `needs_response`, no retrieval (greeting, thanks, complaint, delivery, off-topic) | Yes, without products | `no_products` |
+| Prequal ended the turn (greeting or thanks answered by small talk) | No | |
+
+One more `no_match` case, not in the plan: the user named a product that was
+not found and nothing else narrowed the search (`context.unanchored`).
+Retrieval then fills the list from the whole pool by boosts, which has
+nothing to do with the question, so the responder sends no products and
+says it could not find the name.
+
+### Where it plugs in
+
+```
+handle_message(message, session_id, on_stage=..., on_event=...)      agents/orchestrator/orchestrator.py
+  prequalify -> extractor || semantic -> retrieve                     (sections 9 and 10)
+  products_only + products, nothing relaxed:
+      emit message(intro), products                                   final, no LLM
+  otherwise:
+      emit products (when retrieval found any)                        before the answer is written
+      async for ev in respond_stream(ResponderContext(...)):          agents/responder/agent.py
+          emit ev                                                     card, message chunks, card, disclaimer
+  SessionStore.save: history += (message, reply); last_products = products shown
+api/chat.py: on_event -> wire_event (dumps -> widget cards) -> SSE frame, as it happens; then done
+```
+
+- **Streaming.** `handle_message` gained `on_event(name, data)`. The chat
+  endpoint turns each event into an SSE frame as it happens, so the text
+  streams. Before this change, every event was sent after the turn ended.
+- **One event list for both transports.** The same events are kept in
+  `TurnResult.events`. `api.widget.turn_events` replays them for Streamlit,
+  which gets a whole turn at once, and joins the message chunks into one
+  message event there.
+- **`respond_stream` yields its own `status` and `done` events.** The
+  orchestrator turns `status` into `on_stage("writing")`. It merges `done`
+  (`latency_ms`, `partial`, `source`, `route`, `first_token_ms`, `notes`)
+  into `TurnResult.responder` and the turn's single `done` event
+  (`latency_ms`, `partial`, `pipeline.responder`).
+
+### Module layout
+
+```
+agents/responder/
+  context.py            ResponderContext (Pydantic), mode_for, reply_language, select_products,
+                        per-intent fields, product JSON lines, unanchored
+  prompts.py            persona / intent / situation blocks, store facts, R1 and R2 messages
+  answer.py             R1: streamed through FallBack.astream, route kwargs (reasoning allowance)
+  sales_card.py         R2: schema, call, validation
+  cards.py              how_to_use / safety / compare cards, safety flags, disclaimer rule
+  guardrails.py         price, ingredient, language and length checks
+  fallback_templates.py template answers in ar / arabizi / en
+  agent.py              respond_stream(ctx) -> events; respond(ctx) -> str; collect; warm_up
+prompts/responder/answer.md       R1 static system prompt ({{reply_language}} only)
+prompts/responder/sales_card.md   R2 prompt
+data/store_facts.json             confirmed store facts ({{CS_CONTACT}} still to fill)
+scripts/eval_responder.py         eval command (metrics table)
+tests/responder_eval.jsonl        54 cases
+```
+
+### Reuse of the existing layers
+
+- **LLM client.** A new entry point on `FallBack`: `astream`, the streaming
+  twin of `aconstrained_invoke`. It is additive; nothing else changed.
+  - It walks the same route chain, with the same cached model instances and
+    shared connection pool.
+  - A route that errors or times out before its first text chunk moves on to
+    the next route. Empty chunks do not count, since reasoning models stream
+    those while thinking.
+  - After text has started, a failure or a gap longer than
+    `RESPONDER_IDLE_TIMEOUT_S` raises `StreamBroken`, because retrying on
+    another route would repeat the answer.
+  - `StreamInfo` records the route that served the answer and the time to its
+    first token.
+- **Routes.** `RESPONDER_FALLBACK_ORDER` in `llm/client.py`, read through the
+  peer session's `turn_routes()`, so the hidden `llm=glm|groq` switch covers
+  the responder too.
+- **Prompts** use the `## The prompt` loader. **History** uses
+  `format_history`, so assistant messages are cut to 150 characters there. The
+  session keeps the full reply, without the disclaimer.
+- **Reasoning models** get extra `max_tokens` and `reasoning_effort=low`, as
+  the extractor does (`RESPONDER_REASONING_TOKEN_ALLOWANCE`, 600).
+
+### Prompt and data
+
+- **R1.** The static system prompt comes first. It is byte-identical except
+  for `{{reply_language}}`, which has three variants. The human message
+  follows, in this order: the persona block, the intent block, the situation
+  blocks that apply, store facts, history, product data, the message and its
+  English meaning.
+- **Product data.** At most 5 products, in retrieval's order (name hits
+  first). Compare sends only the named products when two or more were named.
+  Each product is one compact JSON line holding the intent's fields, with
+  empty values dropped, `available` sent only when false, and the description
+  cut to 400 characters. `data_issues`, images, URLs and HTML are never sent.
+- **Reply language.** `ar` and `arabizi` get Egyptian Arabic in Arabic script
+  (`RESPONDER_ARABIZI_REPLY=arabizi` switches Arabizi input to Arabizi
+  replies). `en` gets English. `mixed` uses whichever script dominates the
+  message; a Latin-dominant message with Arabizi markers counts as Arabizi.
+- **R2** (`sales_training` only) runs as a task alongside R1, with the same
+  product lines. Its output is validated item by item: a bad quiz question is
+  dropped, and a card with nothing valid left is skipped.
+
+### Cards, disclaimer and guardrails
+
+- **Deterministic cards** are emitted before R1's first token.
+  - `how_to_use` and `safety` cards cover the named products, else the top
+    one, at most 2.
+  - `compare` needs 2 or more products.
+  - `price_offer` gets no card, because the product cards already show the
+    price.
+- **Safety flags.** A warning mentioning pregnancy or breastfeeding gives
+  `warning`, and this wins over a `suitable_for` label. Otherwise the label
+  gives `suitable`, and anything else is `not_listed`.
+- **Disclaimer.** It is added by code, in the reply language, as the last
+  message chunk. Its rule replaces the widget's old `health` rule (health
+  intents, or a router fallback). It applies to:
+  - `safety`, `how_to_use` and `product_info` answers about Supplements,
+    Skin Repair & Healing, or Joint & Muscle Care
+  - every customer `safety` answer (`unknown` counts as customer)
+- **Guardrails.** Because the text streams, a correction is sent as
+  `message {"text", "replace": true}`, which the widget uses to overwrite the
+  bubble.
+  - **Length** is enforced while streaming. R1 is stopped at 1.5 × the word
+    limit, then cut to the last complete sentence.
+  - **Language.** A wrong-language answer is regenerated once, without
+    streaming, with an extra instruction. The retry is kept only if it is in
+    the right language.
+  - **Price.** An EGP amount or % in the answer that appears nowhere in the
+    product lines, store facts or query is logged. With
+    `RESPONDER_STRICT_GROUNDING`, the template answer replaces the text.
+    - The check recognizes EGP, ج.م, جنيه, LE, %, ٪ and "في المية", and
+      Arabic-Indic digits.
+  - **Plain text.** The widget shows plain text, so bold markers (`**`,
+    `__`) and emoji are stripped from the stream as it arrives, and heading
+    marks (`#`) are removed at the end. This check is not in the plan. The
+    first live run had markdown bold in sales-trainee answers, and emoji in
+    one of them, despite the prompt.
+  - **Ingredients.** English catalog ingredient names that no sent product
+    contains, and the query does not name, are logged as a warning.
+    Arabic names are not checked.
+
+### Fallbacks
+
+| Failure | Result |
+|---|---|
+| R1 fails on every route before any text | Template answer from the data, in the reply language (`source: template`) |
+| R1 stream breaks mid-answer | The text so far is kept; `done.partial = true`; no guardrail replacement |
+| R1 answer fails the price check | Template answer replaces it |
+| R2 fails, is invalid, or is not ready 6 s after R1 ends | No card; the text is unaffected |
+| `respond_stream` itself raises | The orchestrator keeps the text so far, or sends the fixed apology |
+
+The templates follow the voice rules: no exclamation marks and
+gender-neutral Arabic. `tests/test_web.py` now checks them too.
+
+### Configuration (`config.py`, `RESPONDER_*`)
+
+Routes (`RESPONDER_PRIMARY_ROUTE`, `RESPONDER_FALLBACK_ROUTE`,
+`RESPONDER_USE_FALLBACK_MODEL`), `RESPONDER_TEMPERATURE` (0.3),
+`RESPONDER_MAX_TOKENS` and `RESPONDER_WORD_LIMITS` by persona (350/450 and
+80/150), `RESPONDER_LENGTH_FACTOR` (1.5), the reasoning allowance, timeouts
+(first token 8 s, idle 5 s, deadline 20 s), R2 temperature, max_tokens,
+grace (6 s) and deadline (15 s), `RESPONDER_MAX_PRODUCTS` (5),
+`RESPONDER_DESCRIPTION_CHARS` (400), `RESPONDER_ARABIZI_REPLY`,
+`RESPONDER_STRICT_GROUNDING`, `RESPONDER_LANGUAGE_RETRY`,
+`RESPONDER_STORE_FACTS_PATH`.
+
+### Deviations from the plan, and why
+
+- **Location.** The code lives in `agents/responder/` and `prompts/responder/`,
+  following the project layout. The stub `responder.py` was removed, and
+  `/api/respond` now takes the new context fields and returns reply,
+  disclaimer and cards.
+- **Quality tier = `zai:glm-5.3-flash`.** It is the only provider configured
+  by default, and the fast-tier fallback is the same model, so today the
+  fallback is a retry. `?llm=groq` routes the turn to Groq (qwen, then
+  gpt-oss-20b).
+- **R2 timing.** R2 may finish up to 6 s after R1's text ends
+  (`RESPONDER_SALES_CARD_GRACE_S`), capped at 15 s from the start. The plan
+  says 3 s. On GLM, R2 takes about 8 to 10 s and R1's text ends at about
+  4 to 5 s. With a 3 s grace, 2 of the first 3 sales cards timed out, and
+  an absolute 3 s cap would drop them all.
+- **The language check allows an Arabic line in English replies.** An
+  English reply fails only when it is mostly Arabic. The sales-trainee
+  persona requires "one suggested line in Egyptian Arabic", which pushed an
+  English reply past a 20 % threshold and triggered a needless
+  regeneration (15 s).
+- **Guardrails vs. streaming.** Checks run after the text has streamed, and a
+  correction replaces the bubble. Buffering the answer to check it first
+  would give up the first-token target.
+- **Changes to the product data, each made after a live eval finding:**
+  - **Price fields gained `product_type` and `size`.** In the first live
+    probe the model guessed what the product was ("dry shampoo" for a
+    leave-on scalp foam).
+  - **How-to-use fields gained `concerns`.** The customer persona asks for a
+    reason to recommend, and without concerns the model invented one ("for a
+    dry scalp").
+  - **Promotions are spelled out.** "buy 2 get 1 free" is sent instead of
+    `buy2get1`, which the model read as "buy 2 get 3".
+  - **Out-of-stock products always carry `"available": false`,** whatever
+    the intent. The `out_of_stock` block tells the model, so the data has to
+    back it.
+  - **Store facts are sent only for store-type intents** (`other`,
+    `out_of_scope`, `price_offer`, greetings, or no retrieval). With them in
+    every prompt, the model added shipping and payment lines to product
+    answers, against the plan's own "use STORE FACTS only for store
+    questions".
+- **Added intent blocks.** A `find_products` / `refine_products` block
+  covers find requests mixed with a question. The router's catch-all
+  `other` uses the `out_of_scope` block without retrieval, and the
+  `product_info` block with it.
+- **Prompt additions** (noted in the prompt files):
+  - "Prices are in EGP; do not add a disclaimer"
+  - a gender-neutral Arabic example, after the model wrote feminine forms to
+    an unknown user
+  - R2's "objection null / quiz []" line for JSON-mode providers
+- **Widget events.** The products event now comes before the responder's
+  text on responder turns ("sent by the retrieval stage"). Product-list turns
+  keep message, then products. New shapes: `message.delta`,
+  `message.replace`, `message.disclaimer`, `card`, `done.latency_ms`,
+  `done.partial` (see web/README.md). Card events also carry `language`,
+  the reply language.
+  - `bundle.js` gained `Jamila.ResponderCard`, and appends chunks to one
+    bubble.
+  - The query console (`console.js`) does the same. It showed a blank reply
+    until it learned the chunk events, because it built each reply from
+    `data.text`: every chunk became an empty paragraph.
+  - The web files are now served with `Cache-Control: no-cache`
+    (`api/app.py`), so browsers check their cached copy with the server
+    first. Without it, browsers kept the old `console.js` for hours on
+    heuristic freshness, and the blank reply survived a normal reload.
+- **Compare card** adds `names` and a row `key`, and sends `suitable_for` as
+  a list, so the widget can label each value in Arabic.
+- **An Arabizi disclaimer** was added for `RESPONDER_ARABIZI_REPLY=arabizi`.
+
+### Evaluation
+
+`python -u -m scripts.eval_responder --judge --judge-route groq:openai/gpt-oss-120b,zai:glm-5.3-flash`
+runs the 54 cases in `tests/responder_eval.jsonl`. They cover every intent,
+all three personas and unknown, and ar / arabizi / en / mixed. They include
+no-match, relaxed, unresolved-name, contains-excluded and out-of-stock
+cases, greetings, and delivery and payment questions. Retrieval runs for
+real, without semantic search.
+
+- **The answer model.** `zai:glm-5.3-flash` served every row.
+- **The judge.** Groq's gpt-oss-120b, a different model family from the
+  answer model, with GLM as its fallback when Groq's 8k tokens-per-minute
+  limit was hit.
+- **Offline checks.** `--mode offline` (and `tests/test_responder_eval_set.py`)
+  checks the deterministic expectations with template answers and no
+  network.
+
+| Metric (final run, 2026-09-27) | Result | Target |
+|---|---|---|
+| Price groundedness (the LLM's own text) | 100 % | 100 % |
+| Ingredient groundedness | 100 % | 100 % |
+| Language match, final / first try | 100 % / 98.1 % | ≥ 98 % |
+| Mode, deterministic cards, disclaimer, reply-language rule | 100 % each | 100 % |
+| Sales card delivered | 5 / 6 | |
+| Must-mention strings (price, 999, Fawry, concentration...) | 100 % | |
+| Within 1.5 × word limit, never empty | 100 % | 100 % |
+| Judge: correctness / tone / brevity / safety (n = 52, 2 judge errors) | 4.67 / 4.81 / 4.90 / 5.00, **overall 4.85** | ≥ 4 |
+| First token p50 / p95 | 2.6 s / 4.2 s | ≤ 1.2 s, **not met** |
+| Total p50 / p95 | 3.5 s / 9.6 s | ≤ 4 s, **not met at p95** |
+
+How to read these results:
+
+- **Tuning moved correctness from 4.03 to 4.67.** A first partial run of 34
+  rows, before the data changes listed under Deviations, scored correctness
+  4.03, tone 4.94 and brevity 4.68
+  (`logs/eval_responder_live_run1_partial.jsonl`). The fixes came from its
+  low scores: invented reasons, "buy 2 get 3", shipping lines in product
+  answers, and out-of-stock claims the data did not show.
+- **The remaining low scores are mostly the judge being stricter than the
+  spec.** The judge does not see the system prompt, so it faults:
+  - a greeting that names Majestic brands (e43)
+  - "we don't carry Bioderma" for an unresolved competitor name (e40)
+  - general skincare knowledge, which the prompt allows (e10)
+  - the persona's suggested Arabic line in an English reply (e13, first run)
+
+  Real misses remain, such as a doctor answer with marketing phrasing (e09).
+- **The groundedness checks count only what they can see.** They cover
+  currency and percent amounts, and English catalog ingredient names.
+  Invented benefits ("moisturizes a dry scalp") are caught only by the
+  judge.
+- **Latency is GLM's.** glm-5.3-flash always thinks before writing, and its
+  time per call varies widely.
+  - Without sales rows, total p50 is 3.3 s and p95 9.5 s.
+  - Sales rows wait for R2 and take 7.8 to 11.7 s end to end. Their text
+    still streams in the first 2 to 4 s.
+  - The 1.2 s first-token target needs a non-reasoning model on
+    `RESPONDER_PRIMARY_ROUTE`.
+- **Live UI check.** A real turn was typed into both the query console (`/`)
+  and the widget (`/index.html`) on a live server in Chromium. The reply
+  bubble grew as chunks arrived, the how-to-use card and the disclaimer
+  showed, and there were no page errors.
+
+### Known limits
+
+- **GLM thinks before it writes.** glm-5.x cannot turn thinking off, so
+  most of the first-token time is thinking. The 1.2 s first-token target
+  needs a non-reasoning model on the quality tier
+  (`RESPONDER_PRIMARY_ROUTE`); no code changes are needed.
+- **Catalog text is English.** The steps and warnings on cards, and in
+  template answers, are English even when the reply is Arabic. The
+  catalog has no `how_to_use_ar` or `warnings_ar`, and health copy is not
+  machine-translated (web/README.md).
+- **Groundedness checks are narrow.** The price check only sees amounts
+  written with a currency or percent sign, and the ingredient check only
+  sees English catalog names. Invented benefits or claims are left to the
+  prompt and the judge.
+- **The language check is a script ratio.** An English reply full of Arabic
+  product names could fail it, and Arabizi is not told apart from English.
+- **GLM's Egyptian Arabic is uneven.** It sometimes produces garbled
+  words ("راعي الرجالة" for "رجّ العلبة") and feminine imperatives despite
+  the gender-neutral instruction. Another model on the quality tier is the
+  fix.
+- **Safety questions can lose their product upstream.** For "سيروم فيتامين
+  سي ينفع للحامل؟", the live extractor returned no name and put `pregnancy`
+  in `suitable_for` and `concerns`. Strict retrieval then found nothing
+  (the serum is not labeled for pregnancy), so the responder correctly said
+  it had no data. For a safety question, pregnancy is the question, not a
+  filter. This needs a change in the extractor or retrieval (section 10), not
+  in the responder.
+- **`{{CS_CONTACT}}` is still unfilled** in `data/store_facts.json`, so the
+  answer says "Majestic customer service" without a number.

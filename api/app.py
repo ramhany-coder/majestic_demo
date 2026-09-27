@@ -22,6 +22,18 @@ from config import settings
 logger = logging.getLogger("api.app")
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
+# Browsers may keep a cached copy but must check it with the server (ETag ->
+# 304) before using it. Without this, a file that had not changed for a while
+# was reused for hours on heuristic freshness, so an updated console.js or
+# bundle.js did not load on a normal reload.
+REVALIDATE = {"Cache-Control": "no-cache"}
+
+
+class RevalidatedStaticFiles(StaticFiles):
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.update(REVALIDATE)
+        return response
 
 
 @asynccontextmanager
@@ -59,11 +71,11 @@ def health():
 @app.get("/", include_in_schema=False)
 def console():
     """The query console: any query through the pipeline, product listings optional."""
-    return FileResponse(WEB_DIR / "console.html")
+    return FileResponse(WEB_DIR / "console.html", headers=REVALIDATE)
 
 
 # The Jamila widget (/index.html) and its assets, mounted last so the API routes win.
-app.mount("/", StaticFiles(directory=WEB_DIR, html=True), name="web")
+app.mount("/", RevalidatedStaticFiles(directory=WEB_DIR, html=True), name="web")
 
 
 # Run from the repo root with:
